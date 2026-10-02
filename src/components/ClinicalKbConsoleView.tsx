@@ -31,6 +31,7 @@ import {
   Cloud
 } from 'lucide-react';
 import { AdpHarvestResultModal } from './AdpHarvestResultModal';
+import { HelperInfoButton } from './HelperInfoButton';
 import type { KBChangeProposal, Language, ContentStatus, HomeMedicationSuggestion } from '../types';
 import { 
   fetchGuardrailsFromDb, 
@@ -183,10 +184,17 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
             <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center space-x-2 mt-1">
               <FileCheck className="text-teal-600 dark:text-teal-400" size={24} />
               <span>Override Rule Harvesting and Governance</span>
+              <HelperInfoButton
+                title="Override Rule Harvesting and Governance"
+                content={
+                  <div className="space-y-2">
+                    <p><strong>Deterministic Red-Flag Safety Net:</strong> Critical conditions (infant fever, red-flag injuries, anaphylaxis) bypass LLM probabilistic decision-making and are governed strictly by deterministic clinical override rules.</p>
+                    <p><strong>AI Rule Harvesting:</strong> Uses automated agent pipelines (Tencent Cloud Multi-Agent ADP or local @decipher_agent) to harvest and propose clinical guidelines from authoritative medical sources.</p>
+                    <p><strong>SMC Clinician Gate:</strong> Every harvested rule or medication protocol requires explicit Singapore Medical Council (SMC) clinician review and cryptographic sign-off before entering production.</p>
+                  </div>
+                }
+              />
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Deterministic red-flag safety net review • AI Rule Harvesting (@decipher_agent & @ml_agent) • SMC Clinician sign-off gate
-            </p>
           </div>
 
           <div className="flex items-center gap-3">
@@ -205,15 +213,21 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
 
             {/* Environment Release Gate Toggle (SRS CLIN-03) */}
             <div className="flex items-center space-x-3 bg-slate-50 dark:bg-slate-800/60 p-2 rounded-2xl border border-slate-200 dark:border-slate-700">
-              <div className="text-right">
+              <div className="text-right flex items-center gap-1.5 justify-end">
                 <div className="text-xs font-black text-slate-900 dark:text-white">
-                  {environmentMode === 'mvp' ? 'MVP Mode (Provisional Allowed)' : 'Production Gate (Strict)'}
+                  {environmentMode === 'mvp' ? 'MVP Mode (Provisional)' : 'Production Gate (Strict)'}
                 </div>
-                <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                  {environmentMode === 'mvp'
-                    ? 'Displays "Pending clinical review" badge'
-                    : 'Rejects all unapproved clinical rules'}
-                </div>
+                <HelperInfoButton
+                  title="Environment Release Gate (SRS CLIN-03)"
+                  align="end"
+                  size="xs"
+                  content={
+                    <div className="space-y-1.5">
+                      <p><strong>MVP Mode (Provisional Allowed):</strong> Displays a &quot;Pending clinical review&quot; badge for provisional testing and pre-flight evaluation.</p>
+                      <p><strong>Production Gate (Strict):</strong> Rejects all unapproved clinical rules in production, enforcing zero unreviewed medical logic.</p>
+                    </div>
+                  }
+                />
               </div>
               <button
                 onClick={() => onToggleEnvironmentMode(environmentMode === 'mvp' ? 'production' : 'mvp')}
@@ -238,6 +252,10 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
               <div className="flex items-center gap-2 text-xs font-black text-slate-800 dark:text-white">
                 <Shield size={16} className="text-teal-600" />
                 <span>Clinical Guardrails & Hard-Stops Settings (Spec §6)</span>
+                <HelperInfoButton
+                  title="Clinical Guardrails & Hard-Stops (Spec §6)"
+                  content="Configures safety thresholds and deterministic hard-stops enforced prior to patient-facing output. Guardrails prevent model drift and ensure strict adherence to clinical escalation boundaries."
+                />
               </div>
               <span className="text-[10px] bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-300 font-bold px-2 py-0.5 rounded-full">
                 SMC Governance Guardrails Active
@@ -247,8 +265,15 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
               {/* Confidence Floor */}
               <div className="bg-white dark:bg-[#14212B] p-3 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
-                <div className="flex justify-between font-bold text-slate-700 dark:text-slate-300">
-                  <span>Confidence Floor</span>
+                <div className="flex justify-between items-center font-bold text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>Confidence Floor</span>
+                    <HelperInfoButton
+                      size="xs"
+                      title="Confidence Floor Threshold"
+                      content={`Forces conservative escalation if clinical confidence score falls below ${confidenceFloor}%. Prevents low-confidence automated triage decisions.`}
+                    />
+                  </div>
                   <span className="text-teal-700 dark:text-teal-300 font-black">{confidenceFloor}%</span>
                 </div>
                 <input
@@ -260,15 +285,19 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                   onChange={e => setConfidenceFloor(parseInt(e.target.value))}
                   className="w-full accent-teal-600 cursor-pointer"
                 />
-                <div className="text-[10px] text-slate-500">
-                  Forces conservative escalation if confidence &lt; {confidenceFloor}%
-                </div>
               </div>
 
               {/* Allergy Hard Stop */}
               <div className="bg-white dark:bg-[#14212B] p-3 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
-                <div className="flex justify-between font-bold text-slate-700 dark:text-slate-300">
-                  <span>Allergy Hard Stop</span>
+                <div className="flex justify-between items-center font-bold text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>Allergy Hard Stop</span>
+                    <HelperInfoButton
+                      size="xs"
+                      title="Allergy Pre-Output Gate"
+                      content="Blocks any suggested over-the-counter (OTC) medications or interventions that conflict with recorded patient allergies."
+                    />
+                  </div>
                   <span className={`font-black ${allergyHardStop ? 'text-emerald-600' : 'text-slate-400'}`}>
                     {allergyHardStop ? 'ENABLED' : 'OFF'}
                   </span>
@@ -282,15 +311,19 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                 >
                   {allergyHardStop ? '✓ Active Pre-Output Gate' : 'Bypass Disabled'}
                 </button>
-                <div className="text-[10px] text-slate-500">
-                  Blocks OTC conflicts pre-output
-                </div>
               </div>
 
               {/* Age Hard Stop */}
               <div className="bg-white dark:bg-[#14212B] p-3 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
-                <div className="flex justify-between font-bold text-slate-700 dark:text-slate-300">
-                  <span>Age Escalation Gate</span>
+                <div className="flex justify-between items-center font-bold text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>Age Escalation Gate</span>
+                    <HelperInfoButton
+                      size="xs"
+                      title="Age Escalation Gate"
+                      content="Blocks HOME_MONITOR triage for high-risk cohorts: automatically escalates infants < 3 months with fever or frail seniors with fall trauma to emergency care or clinic."
+                    />
+                  </div>
                   <span className={`font-black ${ageHardStop ? 'text-emerald-600' : 'text-slate-400'}`}>
                     {ageHardStop ? 'ENABLED' : 'OFF'}
                   </span>
@@ -304,15 +337,19 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                 >
                   {ageHardStop ? '✓ Inf/Snr Gate Active' : 'Bypass Disabled'}
                 </button>
-                <div className="text-[10px] text-slate-500">
-                  Blocks HOME_MONITOR for fever/falls
-                </div>
               </div>
 
               {/* Freshness Window & State Machine */}
               <div className="bg-white dark:bg-[#14212B] p-3 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
-                <div className="flex justify-between font-bold text-slate-700 dark:text-slate-300">
-                  <span>Freshness Window</span>
+                <div className="flex justify-between items-center font-bold text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>Freshness Window</span>
+                    <HelperInfoButton
+                      size="xs"
+                      title="Freshness Window & Retries"
+                      content="Sets hard expiration on unverified or stale clinical rules requiring recertification after the specified days, and caps automated agent retry cycles."
+                    />
+                  </div>
                   <span className="text-teal-700 dark:text-teal-300 font-black">{stalenessWindowDays} Days</span>
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 pt-1">
@@ -320,9 +357,6 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                   <span className="font-mono font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
                     {maxRetryCount} revisions
                   </span>
-                </div>
-                <div className="text-[10px] text-slate-500">
-                  Hard stop on unverified/stale rules
                 </div>
               </div>
             </div>
@@ -335,6 +369,15 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
             <div className="flex items-center gap-2 text-xs font-black text-slate-800 dark:text-white">
               <Brain size={16} className="text-teal-600" />
               <span>Adhoc Rule Harvesting Configuration</span>
+              <HelperInfoButton
+                title="Adhoc Rule Harvesting Engines"
+                content={
+                  <div className="space-y-2">
+                    <p><strong>Agentic ADP Agents (Tencent Cloud):</strong> Runs an external 4-agent SSE orchestration workflow: Web Evidence Acquisition ➔ Clinical Rule Compiler ➔ Medical Reviewer ➔ Knowledge Database Agent. Parsed proposals are presented in an interactive editable grid modal for review and batch commit.</p>
+                    <p><strong>Local Agents:</strong> Dispatches internal @decipher_agent and local SQLite rule compiler on the application server.</p>
+                  </div>
+                }
+              />
             </div>
             
             {/* Toggle Button: Agentic ADP Agents vs Local Agents */}
@@ -384,26 +427,7 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
             </div>
           </div>
 
-          {/* Engine Explanation Banner */}
-          <div className="text-[11px] text-slate-500 bg-white/60 dark:bg-[#14212B]/60 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800/60 flex items-center justify-between gap-2">
-            {harvestingAgentType === 'adp' ? (
-              <div className="flex items-center gap-2">
-                <Cloud size={14} className="text-teal-600 shrink-0" />
-                <span>
-                  <strong>Agentic ADP Agent Selected:</strong> Dispatches external Tencent Cloud ADP 4-Agent Pipeline (Web Evidence Acquisition ➔ Clinical Rule Compiler ➔ Medical Reviewer ➔ Knowledge Database Agent) via <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded text-[10px]">POST https://wss.lke.tencentcloud.com/adp/v2/chat</code> and renders findings in an interactive popup.
-                </span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Cpu size={14} className="text-indigo-600 shrink-0" />
-                <span>
-                  <strong>Local Agents Selected:</strong> Uses internal <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded text-[10px]">@decipher_agent</code> and local SQLite parser on the server.
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row gap-3 pt-1">
             <input 
               type="text" 
               id="harvest-websites"
@@ -521,27 +545,24 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
               )}
             </button>
           </div>
-          <p className="text-[10px] text-slate-500">
-            {harvestingAgentType === 'adp'
-              ? "Provide a URL to process via Tencent Cloud ADP Multi-Agent API. The 4-agent workflow extracts clinical evidence and presents findings in an interactive popup."
-              : "Provide a list of websites to procure data from. A local agent will parse the provided sites to see if any new rules need to be harvested."}
-          </p>
         </div>
 
         {/* HSA Regulatory Compliance Banner */}
-        <div className="bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 rounded-2xl p-4 text-xs text-indigo-950 dark:text-indigo-200 flex items-start space-x-3">
-          <ShieldCheck size={20} className="text-indigo-700 dark:text-indigo-400 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <div className="font-bold flex items-center gap-2">
-              <span>HSA Software-as-a-Medical-Device (SaMD) & Deterministic Safety Net</span>
-              <span className="text-[10px] bg-indigo-200 dark:bg-indigo-900 text-indigo-900 dark:text-indigo-200 px-2 py-0.2 rounded-full font-bold">
-                Spec §1: Deterministic Code Owns Emergencies
-              </span>
-            </div>
-            <p className="text-indigo-900 dark:text-indigo-300 leading-relaxed text-[11px]">
-              Red-flag conditions bypass LLM hallucination risks via deterministic evaluation. Proposed rule modifications harvested by <strong>@decipher_agent</strong> and home medications extracted by <strong>@home_medication_agent</strong> require explicit SMC clinician cryptographic sign-off before entering production.
-            </p>
+        <div className="bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 rounded-2xl px-4 py-2.5 text-xs text-indigo-950 dark:text-indigo-200 flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <ShieldCheck size={18} className="text-indigo-700 dark:text-indigo-400 shrink-0" />
+            <span className="font-bold text-xs text-indigo-950 dark:text-indigo-200">
+              HSA Software-as-a-Medical-Device (SaMD) & Deterministic Safety Net Active
+            </span>
+            <span className="text-[10px] bg-indigo-200 dark:bg-indigo-900 text-indigo-900 dark:text-indigo-200 px-2 py-0.5 rounded-full font-bold hidden sm:inline-block">
+              Spec §1 Compliance
+            </span>
           </div>
+          <HelperInfoButton
+            title="HSA SaMD Compliance (Spec §1)"
+            align="end"
+            content="Red-flag conditions bypass LLM hallucination risks via deterministic evaluation. Proposed rule modifications harvested by @decipher_agent and home medications extracted by @home_medication_agent require explicit SMC clinician cryptographic sign-off before entering production."
+          />
         </div>
       </div>
 
@@ -585,7 +606,14 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
           {/* Filter Pills */}
           <div className="bg-white dark:bg-[#14212B] p-3 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
             <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center justify-between">
-              <span>Queue ({filteredProposals.length} / {proposals.length})</span>
+              <div className="flex items-center gap-1.5">
+                <span>Queue ({filteredProposals.length} / {proposals.length})</span>
+                <HelperInfoButton
+                  size="xs"
+                  title="Proposals Queue"
+                  content="Harvested clinical guidance rules awaiting Singapore Medical Council (SMC) clinician review, threshold tuning, or verification."
+                />
+              </div>
               <span className="text-teal-700 dark:text-teal-400 text-[10px] font-bold">Auto-Harvest Active</span>
             </div>
 
@@ -864,10 +892,15 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
               <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
                 <FileDiff size={15} className="text-teal-700 dark:text-teal-400" />
                 <span>Deterministic Trigger Specification (Diff & Logic)</span>
+                <HelperInfoButton
+                  size="xs"
+                  title="Deterministic Trigger Specification"
+                  content="The exact proposed condition trigger logic and compiled TypeScript rule snippet that runs directly in the deterministic safety net engine."
+                />
               </div>
               <div className="bg-slate-50 dark:bg-[#0F1A20] p-4 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-mono space-y-2 text-slate-800 dark:text-slate-200">
                 <div className="text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800 pb-1 flex justify-between">
-                  <span>// Proposed Deterministic Net Rule (Non-LLM):</span>
+                  <span>Proposed Deterministic Net Rule (Non-LLM):</span>
                   <span className="text-[10px] text-teal-600">Auditable 100%</span>
                 </div>
                 <p className="whitespace-pre-line text-emerald-900 dark:text-emerald-200 bg-emerald-50/80 dark:bg-emerald-950/40 p-3 rounded-xl border border-emerald-200 dark:border-emerald-800">
@@ -875,7 +908,7 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                 </p>
                 {activeProposal.ruleCodeSnippet && (
                   <div className="pt-1">
-                    <div className="text-[10px] text-slate-500 pb-1">// Live Engine Code Snippet:</div>
+                    <div className="text-[10px] text-slate-500 pb-1">Live Engine Code Snippet:</div>
                     <pre className="bg-slate-900 text-slate-100 p-2.5 rounded-xl text-[11px] overflow-x-auto">
                       {activeProposal.ruleCodeSnippet}
                     </pre>
@@ -889,7 +922,12 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
               <div className="space-y-2">
                 <div className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
                   <FileText size={14} className="text-amber-600 dark:text-amber-400" />
-                  <span>Harvested Source Document Excerpt (Original Medical Guidance):</span>
+                  <span>Harvested Source Document Excerpt</span>
+                  <HelperInfoButton
+                    size="xs"
+                    title="Harvested Source Document Excerpt"
+                    content="Verbatim guidance excerpt harvested from authoritative medical guidelines (e.g. MOH CPG, KidsClinic SG) serving as grounding clinical evidence."
+                  />
                 </div>
                 <div className="text-xs sm:text-sm text-slate-800 dark:text-slate-200 bg-amber-50/70 dark:bg-amber-950/20 p-4 rounded-2xl border border-amber-200/80 dark:border-amber-900/40 leading-relaxed font-mono whitespace-pre-wrap shadow-inner border-l-4 border-l-amber-500">
                   <div className="flex items-start gap-2">
@@ -904,7 +942,12 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
             <div className="space-y-2">
               <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Info size={14} className="text-teal-600" />
-                <span>Clinical Rationale & Evidence:</span>
+                <span>Clinical Rationale & Evidence</span>
+                <HelperInfoButton
+                  size="xs"
+                  title="Clinical Rationale & Evidence"
+                  content="Medical justification explaining why this deterministic threshold is mandatory and how it mitigates patient escalation risk."
+                />
               </div>
               <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-[#0F1A20] p-4 rounded-2xl border border-slate-200 dark:border-slate-800 leading-relaxed">
                 {activeProposal.rationale}
@@ -942,7 +985,14 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
         <div className="space-y-3">
           <div className="bg-white dark:bg-[#14212B] p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
             <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center justify-between">
-              <span>Home Medications ({homeMedications.length})</span>
+              <div className="flex items-center gap-1.5">
+                <span>Home Medications ({homeMedications.length})</span>
+                <HelperInfoButton
+                  size="xs"
+                  title="Home Medications Protocol"
+                  content="First-aid and home medication administration guidelines extracted by @home_medication_agent. Clinician approval is required before OTC guidance is delivered to patients."
+                />
+              </div>
               <span className="text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">@home_medication_agent</span>
             </div>
           </div>
@@ -1069,6 +1119,11 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                 <div className="text-xs font-bold text-emerald-900 dark:text-emerald-200 uppercase tracking-wider flex items-center gap-2">
                   <Pill size={16} className="text-emerald-600" />
                   <span>Approved Administration & Dosage Instructions</span>
+                  <HelperInfoButton
+                    size="xs"
+                    title="Administration & Dosage"
+                    content="Standardized pediatric and adult dosing intervals, maximum 24-hour limits, and route specifications."
+                  />
                 </div>
                 <div className="text-sm font-semibold text-slate-900 dark:text-white leading-relaxed">
                   {activeHomeMed.dosageInstruction}
@@ -1085,7 +1140,12 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                 <div className="space-y-2">
                   <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
                     <Quote size={15} className="text-teal-700 dark:text-teal-400" />
-                    <span>Harvested Source Document Excerpt (Original Medical Guidance)</span>
+                    <span>Harvested Source Document Excerpt</span>
+                    <HelperInfoButton
+                      size="xs"
+                      title="Harvested Source Document Excerpt"
+                      content="Verbatim medical guidance excerpt harvested from clinical references detailing contraindications, dosages, and administration precautions."
+                    />
                   </div>
                   <div className="bg-amber-50/40 dark:bg-[#0F1A20] p-4 rounded-2xl border border-amber-200/80 dark:border-slate-800 text-xs sm:text-sm text-slate-800 dark:text-slate-200 leading-relaxed font-sans whitespace-pre-wrap">
                     {activeHomeMed.rawExcerpt}
