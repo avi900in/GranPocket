@@ -6,6 +6,7 @@ import {
   X,
   Sparkles
 } from 'lucide-react';
+import { HelperInfoButton } from './HelperInfoButton';
 import type { Household, Person } from '../types';
 import { submitCustomerFeedback } from '../services/dbService';
 
@@ -77,10 +78,13 @@ export const CustomerFeedbackView: React.FC<CustomerFeedbackViewProps> = ({
               <MessageSquareHeart size={26} />
             </div>
             <div>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white">Customer Feedback</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                Share your thoughts and suggestions with our care team.
-              </p>
+              <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <span>Customer Feedback</span>
+                <HelperInfoButton
+                  title="Customer Feedback & Care Suggestions"
+                  content="Share your experience regarding triage accuracy, care advice clarity, wait times, or app usability. Feedback submissions are stored directly in SQLite and reviewed by the clinical governance board."
+                />
+              </h2>
             </div>
           </div>
         </div>

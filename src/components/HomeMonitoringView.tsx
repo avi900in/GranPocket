@@ -10,13 +10,14 @@ import {
   Thermometer, 
   TrendingUp, 
   TrendingDown, 
-  Minus,
-  Sparkles,
-  ShieldAlert,
-  PhoneCall,
-  ExternalLink,
-  Check
+  Minus, 
+  Sparkles, 
+  ShieldAlert, 
+  PhoneCall, 
+  ExternalLink, 
+  Check 
 } from 'lucide-react';
+import { HelperInfoButton } from './HelperInfoButton';
 import type { CheckBackPlan, Person, Language, Severity } from '../types';
 import { runTriage } from '../engine/triageEngine';
 
@@ -123,10 +124,11 @@ export const HomeMonitoringView: React.FC<HomeMonitoringViewProps> = ({
           <h2 className="text-xl font-black text-slate-900 flex items-center space-x-2">
             <Heart className="text-rose-600" size={22} />
             <span>Home Monitoring & Dynamic Reassessment</span>
+            <HelperInfoButton
+              title="Home Monitoring & Reassessment"
+              content="Automated cadence check-backs for non-emergency conditions. Allows caregivers to log temperature, pain levels, and symptom progression with automatic safety net escalation if clinical deterioration is detected."
+            />
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Cadence check-backs • "How is [Name] now?" • Automatic deterioration escalation
-          </p>
         </div>
 
         {/* Plan Switcher */}

@@ -25,6 +25,7 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
+import { HelperInfoButton } from './HelperInfoButton';
 import type { Person, Severity, Language, TriageRule } from '../types';
 import { runAgenticOrchestrationPipelineAsync, type AgenticPipelineResult } from '../engine/agenticPipeline';
 import { getAgeDisplay } from '../engine/triageEngine';
@@ -447,10 +448,16 @@ export const MultiAgentSimulatorView: React.FC<MultiAgentSimulatorViewProps> = (
             <h2 className="text-xl font-black text-[#14212B] dark:text-white flex items-center gap-2 mt-1.5">
               <Bot className="text-teal-600 dark:text-teal-400" size={24} />
               <span>Multi-Agent Triage Simulator & Audit Trail Inspector</span>
+              <HelperInfoButton
+                title="Multi-Agent Pipeline Simulator"
+                content={
+                  <div className="space-y-1.5">
+                    <p>Simulates end-to-end multi-agent triage executions with real-time agent dispatch and attestation loops.</p>
+                    <p><strong>Agents involved:</strong> @triage_orchestrator, @decipher_agent, @red_flag_sentinel, @pediatric_agent / @geriatric_agent, and @safety_net_auditor.</p>
+                  </div>
+                }
+              />
             </h2>
-            <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-0.5">
-              Simulate end-to-end triage sessions with <strong>each agent call, decision, and attestation loop called out explicitly</strong>.
-            </p>
           </div>
 
           <div className="flex items-center gap-3">

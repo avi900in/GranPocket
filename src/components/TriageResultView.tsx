@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   Pill
 } from 'lucide-react';
+import { HelperInfoButton } from './HelperInfoButton';
 import type { TriageResult, Person, Address, EmergencyContact, Language, Ailment } from '../types';
 import { getSeverityDisplay } from '../engine/severityDisplay';
 import { findNearestFacilities, isPanelHospital } from '../engine/singaporeData';
@@ -279,10 +280,11 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
                 <div className="font-heading font-extrabold text-[#2E7D32] dark:text-[#81C784] text-base flex items-center gap-2">
                   <Heart size={18} />
                   <span>Start At-Home Monitoring Schedule</span>
+                  <HelperInfoButton
+                    title="At-Home Monitoring Schedule"
+                    content="Initiates proactive check-in cadences (every 4-6 hours) to track temperature, pain, and red flag symptoms automatically."
+                  />
                 </div>
-                <p className="text-xs sm:text-sm text-[#14212B] dark:text-[#F1F5F9]">
-                  GranPocket will send check-in reminders and track red flag symptoms automatically.
-                </p>
               </div>
               <button
                 onClick={onCreateMonitoringPlan}
@@ -310,8 +312,12 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
                         MOH Licensed
                       </span>
                     </div>
-                    <h3 className="font-heading font-black text-lg sm:text-xl text-slate-900 dark:text-slate-100 mt-0.5">
-                      Connect with Singapore Teleconsultation Options
+                    <h3 className="font-heading font-black text-lg sm:text-xl text-slate-900 dark:text-slate-100 mt-0.5 flex items-center gap-2">
+                      <span>Singapore Teleconsultation Options</span>
+                      <HelperInfoButton
+                        title="Urgent Care Telemedicine"
+                        content="For Orange alert conditions requiring timely physician review within hours, connect immediately with Singapore registered doctors via WhiteCoat or Doctor Anywhere with doorstep medication delivery."
+                      />
                     </h3>
                   </div>
                 </div>
@@ -322,10 +328,6 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
                   </span>
                 </div>
               </div>
-
-              <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
-                For Orange alert conditions requiring timely physician review within hours, avoid waiting in physical clinic queues. Connect immediately with Singapore registered doctors with doorstep medication delivery.
-              </p>
 
               {/* 2 Teleconsult Provider Options: WhiteCoat & Dr Anywhere */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -430,13 +432,14 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
 
               {/* One-Click Clinical Handoff Summary for Teleconsult Doctor */}
               <div className="p-4 rounded-2xl bg-white/90 dark:bg-[#0F1A20]/90 border border-amber-300 dark:border-amber-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-                <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
                   <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">
                     📋 Teleconsult Clinical Handoff Summary Ready
                   </span>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                    Copies vital signs, red flags, allergies, and symptom timeline ready to paste directly into WhiteCoat or Dr Anywhere chat.
-                  </p>
+                  <HelperInfoButton
+                    title="Teleconsult Clinical Handoff Note"
+                    content="Copies vital signs, red flags, allergies, and symptom timeline ready to paste directly into WhiteCoat, Dr Anywhere, or Speedoc chat."
+                  />
                 </div>
                 <button
                   onClick={handleCopyHandoffNote}
@@ -453,10 +456,16 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
           {nearestHospitals.length > 0 && result.severity !== 'GREEN' && (
             <div className="space-y-3 border-t border-[#DDE5E9] dark:border-[#1E2D37] pt-5">
               <div className="flex items-center justify-between">
-                <h3 className="font-heading font-extrabold text-base text-[#14212B] dark:text-[#F1F5F9] flex items-center gap-2">
-                  <MapPin size={18} className="text-[#0F766E]" />
-                  <span>Nearest Singapore Medical Facilities</span>
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-heading font-extrabold text-base text-[#14212B] dark:text-[#F1F5F9] flex items-center gap-2">
+                    <MapPin size={18} className="text-[#0F766E]" />
+                    <span>Nearest Singapore Medical Facilities</span>
+                  </h3>
+                  <HelperInfoButton
+                    title="Singapore Medical Facilities"
+                    content="Ranked by geodesic distance from registered Singapore postal code with realtime operating hours, ER capacity, and one-touch navigation."
+                  />
+                </div>
                 <span className="text-xs text-[#52616B] dark:text-[#94A3B8]">
                   From postal {address.postalCode}
                 </span>

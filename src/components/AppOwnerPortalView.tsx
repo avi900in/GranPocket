@@ -70,6 +70,7 @@ import { AILMENTS, RED_FLAG_RULES, AGENTIC_KNOWLEDGE_REPOSITORY } from '../engin
 import { SINGAPORE_FACILITIES } from '../data/mockData';
 import { lookupSingaporePostalCode } from '../engine/singaporeData';
 import { MultiAgentSimulatorView } from './MultiAgentSimulatorView';
+import { HelperInfoButton } from './HelperInfoButton';
 import {
   fetchCustomerFeedback,
   fetchKeyStatistics,
@@ -1292,10 +1293,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
               <h2 className="text-base font-black text-[#14212B] dark:text-white flex items-center gap-2">
                 <Users className="text-[#0F766E] dark:text-[#2DD4BF]" size={20} />
                 <span>Family Role-Based Access Control (SRS Section 3 & 9)</span>
+                <HelperInfoButton
+                  title="Family Role-Based Access Control"
+                  content="Configures screen permissions, member system roles, and architectural capability boundaries for any family household. Governs who can sign off clinical rules, trigger emergency SOS, or edit medical profiles."
+                />
               </h2>
-              <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-1">
-                Configure screen permissions, member system roles, and architectural capability boundaries for any family household.
-              </p>
             </div>
 
             <div className="flex items-center gap-3">
@@ -1581,10 +1583,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                   <h2 className="text-lg font-black text-[#14212B] dark:text-white flex items-center gap-2 mt-1">
                     <Sliders className="text-[#0F766E] dark:text-[#2DD4BF]" size={22} />
                     <span>Clinical Rule Builder & Knowledge Repository</span>
+                    <HelperInfoButton
+                      title="Clinical Rule Builder & Knowledge Repository"
+                      content="Models assist, rules decide. This comprehensive clinical rule repository is maintained by @knowledge_agent across all severity tiers (Red, Orange, Yellow, Green) and backed by SQLite WAL storage."
+                    />
                   </h2>
-                  <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-0.5">
-                    "Models assist, rules decide". Complete clinical rule repository maintained by <strong>@knowledge_agent</strong> across all severity tiers.
-                  </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -1966,10 +1969,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                       </div>
                       <h2 className="text-xl font-black text-white flex items-center gap-2">
                         <span>Machine Learning Rule Induction & Knowledge Ingestion</span>
+                        <HelperInfoButton
+                          title="ML Rule Induction & Knowledge Ingestion"
+                          content="Ingests real-world clinical datasets via @decipher_agent, extracts continuous vital sign cutoffs and entropy-maximizing triage rules with @ml_agent, enforces Singapore MOH deterministic red-lines, and feeds approved candidate rules directly into @knowledge_agent (SQLite WAL)."
+                        />
                       </h2>
-                      <p className="text-xs text-slate-300 max-w-2xl mt-1 leading-relaxed">
-                        Ingest real-world clinical datasets via <strong>@decipher_agent</strong>, extract continuous vital sign cutoffs and entropy-maximizing triage rules with <strong>@ml_agent</strong>, enforce Singapore MOH deterministic red-lines, and feed approved candidate rules directly into <strong>@knowledge_agent</strong> (SQLite WAL).
-                      </p>
                     </div>
 
                     <div className="flex items-center gap-2 bg-slate-900/80 backdrop-blur-md p-3 rounded-2xl border border-slate-700/60 text-xs">
@@ -2678,10 +2682,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
               <h2 className="text-base font-black text-[#14212B] dark:text-white flex items-center gap-2">
                 <Building2 className="text-[#0F766E] dark:text-[#2DD4BF]" size={20} />
                 <span>Singapore Hospital & Clinic Facility Registry</span>
+                <HelperInfoButton
+                  title="Hospital & Clinic Facility Registry"
+                  content="Add new hospitals, polyclinics, or CHAS emergency clinics. Newly registered facilities immediately reflect on the live Leaflet map and nearest finder."
+                />
               </h2>
-              <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-1">
-                Add new hospitals, polyclinics, or CHAS emergency clinics. Newly registered facilities immediately reflect on the live Leaflet map and nearest finder.
-              </p>
             </div>
 
             <form onSubmit={handleCreateFacility} className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
@@ -2839,10 +2844,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                 <h2 className="text-base font-black text-[#14212B] dark:text-white flex items-center gap-2">
                   <Bluetooth className="text-blue-500" size={20} />
                   <span>Bluetooth Low Energy (BLE) Medical Device Test Bench</span>
+                  <HelperInfoButton
+                    title="Bluetooth BLE Medical Device Test Bench"
+                    content="Connect clinical sensors (pulse oximeters, blood pressure monitors, thermometers), inspect raw GATT packet telemetry, and verify data ingestion pipelines."
+                  />
                 </h2>
-                <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-1">
-                  Connect clinical sensors, inspect raw GATT packet telemetry, and verify data ingestion pipelines.
-                </p>
               </div>
 
               <button
@@ -2972,15 +2978,16 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                   <h2 className="text-base font-black text-[#14212B] dark:text-white flex items-center gap-2">
                     <CloudSun className="text-amber-500" size={20} />
                     <span>Singapore Weather & Surrounding Geo-Conditions</span>
+                    <HelperInfoButton
+                      title="NEA Weather & Environmental Feeds"
+                      content="Real-time data from National Environment Agency (NEA) & data.gov.sg API. Feeds rainfall, temperature, and 24-hr PSI haze metrics directly into asthma and heat-exhaustion clinical triage rules."
+                    />
                   </h2>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                     <span>Live Official NEA Feed</span>
                   </span>
                 </div>
-                <p className="text-xs text-[#52616B] dark:text-[#94A3B8]">
-                  Real-time data from National Environment Agency (NEA) & data.gov.sg API. Feeds directly into clinical triage rules.
-                </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -3200,10 +3207,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
               <h2 className="text-base font-black text-[#14212B] dark:text-white flex items-center gap-2">
                 <CreditCard className="text-[#0F766E] dark:text-[#2DD4BF]" size={20} />
                 <span>Singapore Integrated Shield Plans (IP) & eLOG Pre-Authorization</span>
+                <HelperInfoButton
+                  title="Integrated Shield Plans & eLOG Gateway"
+                  content="Direct integration with Great Eastern, AIA, Prudential, Singlife, and NTUC Income. Simulates real-time Electronic Letter of Guarantee (eLOG) decisions and claim pre-authorizations."
+                />
               </h2>
-              <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-1">
-                Direct integration with Great Eastern, AIA, Prudential, Singlife, and NTUC Income. Simulate real-time Electronic Letter of Guarantee (eLOG) decisions.
-              </p>
             </div>
 
             <form onSubmit={handleSimulateElog} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-5 rounded-2xl bg-[#F6F8FA] dark:bg-[#0F1A20] border border-[#DDE5E9] dark:border-[#1E2D37]">
@@ -3348,10 +3356,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                 <h2 className="text-base font-black text-[#14212B] dark:text-white flex items-center gap-2">
                   <Watch className="text-indigo-600 dark:text-indigo-400" size={20} />
                   <span>Known Wearables Integration (Apple Watch HealthKit & Bio-Sensors)</span>
+                  <HelperInfoButton
+                    title="Apple HealthKit & Bio-Sensor Wearables"
+                    content="Syncs continuous Apple HealthKit telemetry: Single-lead ECG rhythm classification, resting HR alerts, and fall detection SOS triggers directly into patient risk models."
+                  />
                 </h2>
-                <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-1">
-                  Sync continuous Apple HealthKit telemetry: Single-lead ECG rhythm classification, resting HR alerts, and fall detection SOS triggers.
-                </p>
               </div>
 
               <span className="inline-flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-3 py-1 rounded-full text-xs font-bold border border-indigo-200 dark:border-indigo-800">
@@ -3497,10 +3506,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
               </div>
               <h2 className="text-xl sm:text-2xl font-black text-[#14212B] dark:text-white flex items-center gap-2">
                 <span>Key System Statistics & Multi-Agent Telemetry</span>
+                <HelperInfoButton
+                  title="Key System Statistics & Telemetry"
+                  content="Real-time operational metrics across registered Singapore households, triage engine invocations, LLM agent health, and adversarial conflict reconciliations."
+                />
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Real-time operational metrics across registered Singapore households, triage engine invocations, LLM agent health, and adversarial conflict reconciliations.
-              </p>
             </div>
 
             <div className="flex items-center gap-3">
@@ -3851,10 +3861,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                 <span className="text-xs bg-amber-400 text-slate-950 font-black px-2.5 py-0.5 rounded-full">
                   {feedbackList.length} Stored in SQLite
                 </span>
+                <HelperInfoButton
+                  title="Customer Feedback Submissions"
+                  content="Reviews, ratings, and qualitative feedback submitted by Singapore families and SMC clinicians. Stored persistently in SQLite (data/chat.db)."
+                />
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Reviews and ratings submitted by Singapore families via the Customer Feedback form in the Family section.
-              </p>
             </div>
 
             <div className="flex items-center gap-2.5">

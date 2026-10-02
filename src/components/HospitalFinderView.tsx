@@ -7,18 +7,19 @@ import {
   Filter, 
   ShieldCheck, 
   Clock, 
-  Navigation,
-  Crosshair,
-  Loader2,
-  AlertTriangle,
-  LocateFixed,
-  Layers,
-  CheckCircle2,
-  ExternalLink,
-  ChevronRight,
-  Sparkles,
-  Baby
+  Navigation, 
+  Crosshair, 
+  Loader2, 
+  AlertTriangle, 
+  LocateFixed, 
+  Layers, 
+  CheckCircle2, 
+  ExternalLink, 
+  ChevronRight, 
+  Sparkles, 
+  Baby 
 } from 'lucide-react';
+import { HelperInfoButton } from './HelperInfoButton';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { HospitalFacility, Language } from '../types';
@@ -433,10 +434,11 @@ export const HospitalFinderView: React.FC<HospitalFinderViewProps> = ({
             <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center space-x-2">
               <Building2 className="text-[#0F766E] dark:text-[#2DD4BF] shrink-0" size={24} />
               <span>Singapore Hospitals, A&E & Urgent Care</span>
+              <HelperInfoButton
+                title="Singapore Healthcare Facilities & Navigation"
+                content="Locates nearby 24-hour A&E departments, urgent care centers, and polyclinics. Includes live GPS reverse geocoding, driving ETA estimates, and MediShield Life/integrated shield plan panel indicators."
+              />
             </h2>
-            <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-0.5">
-              Live GPS detection, real OpenStreetMap navigation, emergency A&E wait routes, and insurance panels
-            </p>
           </div>
 
           {/* Location Action Buttons */}

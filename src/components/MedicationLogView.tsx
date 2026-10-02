@@ -13,6 +13,7 @@ import {
   X,
   Sparkles
 } from 'lucide-react';
+import { HelperInfoButton } from './HelperInfoButton';
 import type { MedicationLogEntry, Person, Language } from '../types';
 import { getDuplicateDoseWarning } from '../engine/grandmaVoice';
 
@@ -120,10 +121,11 @@ export const MedicationLogView: React.FC<MedicationLogViewProps> = ({
           <h2 className="text-xl font-black text-slate-900 flex items-center space-x-2">
             <Pill className="text-teal-600" size={22} />
             <span>Shared Medication Log & Safety</span>
+            <HelperInfoButton
+              title="Shared Medication Log & Safety"
+              content="Real-time household visibility that prevents accidental double-dosing across family caregivers and domestic helpers. Every dose logged triggers interval validation before administration."
+            />
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Real-time household visibility • Prevents accidental double-dosing (especially for infants and elderly)
-          </p>
         </div>
 
         <div className="flex items-center space-x-2">
@@ -156,11 +158,13 @@ export const MedicationLogView: React.FC<MedicationLogViewProps> = ({
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
         <div className="flex items-center space-x-2.5">
           <AlertTriangle size={18} className="text-amber-600 shrink-0" />
-          <div>
-            <span className="font-bold text-amber-950">Duplicate-Dose Safety Demonstration (E2E-03): </span>
-            <span className="text-amber-800">
-              Lucas was given Infant Paracetamol 1.5 hours ago. Try logging another dose now to test safety interception!
-            </span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-bold text-amber-950">Duplicate-Dose Safety Interception (E2E-03)</span>
+            <HelperInfoButton
+              size="xs"
+              title="Duplicate-Dose Demonstration"
+              content="Lucas was given Infant Paracetamol 1.5 hours ago. Attempting another dose triggers a mandatory safety interception to prevent accidental hepatotoxicity."
+            />
           </div>
         </div>
         <button

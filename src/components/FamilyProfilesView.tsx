@@ -22,6 +22,7 @@ import {
   Send,
   MessageSquare
 } from 'lucide-react';
+import { HelperInfoButton } from './HelperInfoButton';
 import type { Person, Household, Language, MedicalCondition, Allergy, Medication } from '../types';
 import { getAgeDisplay } from '../engine/triageEngine';
 import { submitCustomerFeedback, savePersonToDb } from '../services/dbService';
@@ -346,16 +347,24 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
                 <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200 shrink-0">
                   {members.length}/10 Members
                 </span>
+                <HelperInfoButton
+                  title="Household Family Management"
+                  content="Manage multi-generational household profiles (infants, children, adults, seniors). Tracks chronic conditions, drug/food allergies, current medications, and designated primary caregivers."
+                />
               </div>
             </div>
           ) : (
             <h2 className="text-lg sm:text-xl font-black text-slate-900 flex items-center space-x-2">
               <Home className="text-teal-600" size={20} />
               <span>{household.name} (10-Member Capacity)</span>
+              <HelperInfoButton
+                title="Household Family Management"
+                content="Manage multi-generational household profiles (infants, children, adults, seniors). Tracks chronic conditions, drug/food allergies, current medications, and designated primary caregivers."
+              />
             </h2>
           )}
           <p className="text-xs text-slate-500">
-            Primary Home: {household.addresses[0]?.text} • Click any profile to view or edit
+            Primary Home: {household.addresses[0]?.text}
           </p>
         </div>
 
