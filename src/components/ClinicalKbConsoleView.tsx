@@ -82,6 +82,8 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
   const [homeMedications, setHomeMedications] = useState<HomeMedicationSuggestion[]>([]);
   const [selectedMedId, setSelectedMedId] = useState<string>('');
   const [showMedSignOffModal, setShowMedSignOffModal] = useState<boolean>(false);
+  const [showMedPendingModal, setShowMedPendingModal] = useState<boolean>(false);
+  const [showProposalPendingModal, setShowProposalPendingModal] = useState<boolean>(false);
 
   // Agentic ADP Harvester state
   const [harvestingAgentType, setHarvestingAgentType] = useState<'adp' | 'local'>('adp');
@@ -143,9 +145,41 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
     if (!activeHomeMed) return;
     const ok = await approveHomeMedicationInDb(activeHomeMed.id, doctorName, mcrNumber);
     if (ok) {
-      setHomeMedications(prev => prev.map(m => m.id === activeHomeMed.id ? { ...m, status: 'approved', reviewedBy: doctorName, mcrNumber } : m));
+      setHomeMedications(prev => prev.map(m => m.id === activeHomeMed.id ? { ...m, status: 'approved', reviewedBy: doctorName, mcrNumber, reviewedAt: new Date().toISOString() } : m));
       setShowMedSignOffModal(false);
+      const freshMeds = await fetchHomeMedicationsFromDb();
+      if (freshMeds && freshMeds.length > 0) {
+        setHomeMedications(freshMeds);
+      }
     }
+  };
+
+  const handleConfirmMoveHomeMedToPending = async () => {
+    if (!activeHomeMed) return;
+    const medId = activeHomeMed.id;
+    // Optimistic UI update
+    setHomeMedications(prev =>
+      prev.map(m =>
+        m.id === medId
+          ? { ...m, status: 'pending_review', reviewedBy: undefined, mcrNumber: undefined, reviewedAt: undefined }
+          : m
+      )
+    );
+    setShowMedPendingModal(false);
+
+    const ok = await moveHomeMedicationToPendingInDb(medId);
+    if (ok) {
+      const freshMeds = await fetchHomeMedicationsFromDb();
+      if (freshMeds && freshMeds.length > 0) {
+        setHomeMedications(freshMeds);
+      }
+    }
+  };
+
+  const handleConfirmMoveProposalToPending = () => {
+    if (!activeProposal) return;
+    onMoveToPendingProposal?.(activeProposal.id);
+    setShowProposalPendingModal(false);
   };
 
   const handleDeleteHomeMed = async (id: string) => {
@@ -801,11 +835,7 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                     </div>
 
                     <button
-                      onClick={() => {
-                        if (window.confirm('Move this approved rule back to Pending Review status? It will no longer execute in production until re-approved.')) {
-                          onMoveToPendingProposal?.(activeProposal.id);
-                        }
-                      }}
+                      onClick={() => setShowProposalPendingModal(true)}
                       className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700/80 font-bold text-xs rounded-xl shadow-xs transition-all flex items-center space-x-1.5 transform hover:-translate-y-0.5"
                       title="Move back to Pending Review status"
                     >
@@ -1074,20 +1104,7 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                       </div>
 
                       <button
-                        onClick={async () => {
-                          if (window.confirm('Move this approved home medication protocol back to Pending Review status?')) {
-                            const ok = await moveHomeMedicationToPendingInDb(activeHomeMed.id);
-                            if (ok) {
-                              setHomeMedications(prev =>
-                                prev.map(m =>
-                                  m.id === activeHomeMed.id
-                                    ? { ...m, status: 'pending_review', reviewedBy: undefined, mcrNumber: undefined, reviewedAt: undefined }
-                                    : m
-                                )
-                              );
-                            }
-                          }
-                        }}
+                        onClick={() => setShowMedPendingModal(true)}
                         className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700/80 font-bold text-xs rounded-xl shadow-xs transition-all flex items-center space-x-1.5 transform hover:-translate-y-0.5"
                         title="Move back to Pending Review status"
                       >
@@ -1300,6 +1317,124 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Move Home Medication Protocol back to Pending Review */}
+      {showMedPendingModal && activeHomeMed && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-[#14212B] rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
+                  <RotateCcw size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    Move Protocol to Pending Review
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                    {activeHomeMed.id}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMedPendingModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/50 space-y-2 text-xs">
+              <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Pill size={15} className="text-amber-600" />
+                <span>{activeHomeMed.medicationName}</span>
+              </div>
+              <div className="text-slate-600 dark:text-slate-300">
+                Indication: <strong className="text-slate-800 dark:text-slate-100">{activeHomeMed.conditionName}</strong>
+              </div>
+              <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed pt-1 border-t border-amber-200/60 dark:border-amber-900/40">
+                ⚠️ Reverting this protocol to <strong>Pending Review</strong> will revoke clinician sign-off. It will no longer be dispensed automatically in triage until re-approved by an SMC doctor.
+              </p>
+            </div>
+
+            <div className="pt-2 flex justify-end space-x-2.5">
+              <button
+                type="button"
+                onClick={() => setShowMedPendingModal(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMoveHomeMedToPending}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-900/20 active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                <RotateCcw size={14} />
+                <span>Confirm Move to Pending</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Move KB Proposal back to Pending Review */}
+      {showProposalPendingModal && activeProposal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-[#14212B] rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
+                  <RotateCcw size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    Move Rule to Pending Review
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                    {activeProposal.id}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowProposalPendingModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/50 space-y-2 text-xs">
+              <div className="font-bold text-slate-900 dark:text-white">
+                {activeProposal.title}
+              </div>
+              <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                ⚠️ Moving this rule back to <strong>Pending Review</strong> will pause its execution in production triage until re-approved by an SMC clinician.
+              </p>
+            </div>
+
+            <div className="pt-2 flex justify-end space-x-2.5">
+              <button
+                type="button"
+                onClick={() => setShowProposalPendingModal(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMoveProposalToPending}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-900/20 active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                <RotateCcw size={14} />
+                <span>Confirm Move to Pending</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

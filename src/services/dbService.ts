@@ -376,7 +376,9 @@ export async function approveHomeMedicationInDb(id: string, doctorName: string, 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, doctorName, mcrNumber }),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => ({}));
+    return data.success !== false;
   } catch (err) {
     console.error('[dbService] Error approving home medication in DB:', err);
     return false;
@@ -390,7 +392,9 @@ export async function rejectHomeMedicationInDb(id: string, doctorName?: string, 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, doctorName, mcrNumber }),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => ({}));
+    return data.success !== false;
   } catch (err) {
     console.error('[dbService] Error rejecting home medication in DB:', err);
     return false;
@@ -404,7 +408,9 @@ export async function moveHomeMedicationToPendingInDb(id: string): Promise<boole
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => ({}));
+    return data.success !== false;
   } catch (err) {
     console.error('[dbService] Error moving home medication to pending in DB:', err);
     return false;

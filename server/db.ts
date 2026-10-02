@@ -1141,12 +1141,13 @@ export function updateHomeMedicationStatus(
   mcrNumber?: string
 ): boolean {
   const now = new Date().toISOString();
+  const reviewedAt = status === 'approved' ? now : null;
   const stmt = db.prepare(`
     UPDATE home_medications
     SET status = ?, reviewed_by = ?, mcr_number = ?, reviewed_at = ?, updated_at = ?
     WHERE id = ?
   `);
-  const res = stmt.run(status, reviewedBy || null, mcrNumber || null, now, now, id);
+  const res = stmt.run(status, reviewedBy || null, mcrNumber || null, reviewedAt, now, id);
   return res.changes > 0;
 }
 
