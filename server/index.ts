@@ -1939,9 +1939,14 @@ app.post('/api/agentic/adp-ingest', async (req, res) => {
 
       const isNonConforming = r.review_decision === 'APPROVE_WITH_CONDITIONS' || r.review_decision === 'REQUEST_REVISION' || r.review_decision === 'ESCALATE_TO_HUMAN_PHYSICIAN';
 
+      let cleanTitle = r.title || `Harvested Clinical Rule #${i + 1}`;
+      if (!cleanTitle.startsWith('⚠️') && !cleanTitle.startsWith('Auto-Harvested:') && !cleanTitle.startsWith('Auto-Harvested Rule:')) {
+        cleanTitle = `${isNonConforming ? '⚠️ Review Needed: ' : 'Auto-Harvested: '}${cleanTitle}`;
+      }
+
       const proposal = {
         id: safeId,
-        title: r.title ? `${isNonConforming ? '⚠️ Review Needed: ' : 'Auto-Harvested: '}${r.title}` : `Harvested Clinical Rule #${i + 1}`,
+        title: cleanTitle,
         ruleCodeSnippet: r.rule_code_snippet || `if (context.${r.knowledge_id?.toLowerCase() || 'symptom'}) return EMERGENCY_HALT('HARVEST-${r.knowledge_id || 'RULE'}');`,
         rationale: r.rationale || r.review_rationale || 'Extracted and verified by Tencent Cloud ADP Multi-Agent Harvester Pipeline.',
         diff: {
