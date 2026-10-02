@@ -27,8 +27,10 @@ import {
   FileText,
   Quote,
   Pill,
-  RotateCcw
+  RotateCcw,
+  Cloud
 } from 'lucide-react';
+import { AdpHarvestResultModal } from './AdpHarvestResultModal';
 import type { KBChangeProposal, Language, ContentStatus, HomeMedicationSuggestion } from '../types';
 import { 
   fetchGuardrailsFromDb, 
@@ -79,6 +81,13 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
   const [homeMedications, setHomeMedications] = useState<HomeMedicationSuggestion[]>([]);
   const [selectedMedId, setSelectedMedId] = useState<string>('');
   const [showMedSignOffModal, setShowMedSignOffModal] = useState<boolean>(false);
+
+  // Agentic ADP Harvester state
+  const [harvestingAgentType, setHarvestingAgentType] = useState<'adp' | 'local'>('adp');
+  const [adpModalOpen, setAdpModalOpen] = useState(false);
+  const [adpHarvestResult, setAdpHarvestResult] = useState<any>(null);
+  const [isAdpLoading, setIsAdpLoading] = useState(false);
+  const [adpTargetUrl, setAdpTargetUrl] = useState('https://kidsclinic.sg/pd-guides/health-topics/injuries-in-children/');
 
   // Load active clinical guardrails and home medications from SQLite database
   React.useEffect(() => {
@@ -322,32 +331,134 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
 
         {/* Adhoc Rule Harvesting Screen */}
         <div className="bg-slate-50 dark:bg-[#0F1A20] rounded-2xl p-4 border border-slate-200 dark:border-slate-800 space-y-3 animate-fadeIn mt-4">
-          <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2.5 gap-2">
             <div className="flex items-center gap-2 text-xs font-black text-slate-800 dark:text-white">
               <Brain size={16} className="text-teal-600" />
               <span>Adhoc Rule Harvesting Configuration</span>
             </div>
-            <span className="text-[10px] bg-indigo-100 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-300 font-bold px-2 py-0.5 rounded-full">
-              Agentic Harvesting
-            </span>
+            
+            {/* Toggle Button: Agentic ADP Agents vs Local Agents */}
+            <div className="flex items-center gap-2">
+              <div className="inline-flex p-0.5 bg-slate-200/80 dark:bg-slate-900 rounded-xl border border-slate-300/80 dark:border-slate-800 shadow-inner">
+                <button
+                  type="button"
+                  id="toggle-adp-agents"
+                  onClick={() => setHarvestingAgentType('adp')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    harvestingAgentType === 'adp'
+                      ? 'bg-gradient-to-r from-teal-600 to-indigo-600 text-white shadow-md'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Sparkles size={13} className={harvestingAgentType === 'adp' ? 'text-teal-200' : ''} />
+                  <span>Agentic ADP Agents</span>
+                  {harvestingAgentType === 'adp' && (
+                    <span className="text-[9px] bg-white/20 text-white px-1.5 py-0.2 rounded-full font-black">
+                      Selected
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  id="toggle-local-agents"
+                  onClick={() => setHarvestingAgentType('local')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    harvestingAgentType === 'local'
+                      ? 'bg-slate-800 dark:bg-slate-700 text-white shadow-md'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Cpu size={13} />
+                  <span>Local Agents</span>
+                  {harvestingAgentType === 'local' && (
+                    <span className="text-[9px] bg-white/20 text-white px-1.5 py-0.2 rounded-full font-black">
+                      Selected
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              <span className="text-[10px] bg-indigo-100 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-300 font-bold px-2 py-0.5 rounded-full hidden sm:inline-block">
+                {harvestingAgentType === 'adp' ? 'Tencent Cloud Multi-Agent' : 'Local In-App Engine'}
+              </span>
+            </div>
           </div>
+
+          {/* Engine Explanation Banner */}
+          <div className="text-[11px] text-slate-500 bg-white/60 dark:bg-[#14212B]/60 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800/60 flex items-center justify-between gap-2">
+            {harvestingAgentType === 'adp' ? (
+              <div className="flex items-center gap-2">
+                <Cloud size={14} className="text-teal-600 shrink-0" />
+                <span>
+                  <strong>Agentic ADP Agent Selected:</strong> Dispatches external Tencent Cloud ADP 4-Agent Pipeline (Web Evidence Acquisition ➔ Clinical Rule Compiler ➔ Medical Reviewer ➔ Knowledge Database Agent) via <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded text-[10px]">POST https://wss.lke.tencentcloud.com/adp/v2/chat</code> and renders findings in an interactive popup.
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Cpu size={14} className="text-indigo-600 shrink-0" />
+                <span>
+                  <strong>Local Agents Selected:</strong> Uses internal <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded text-[10px]">@decipher_agent</code> and local SQLite parser on the server.
+                </span>
+              </div>
+            )}
+          </div>
+
           <div className="flex flex-col sm:flex-row gap-3">
             <input 
               type="text" 
               id="harvest-websites"
-              placeholder="Comma-separated websites (e.g. https://www.moh.gov.sg/guidelines)" 
-              className="flex-1 p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#14212B] text-xs focus:border-teal-500 font-mono text-slate-900 dark:text-white"
-              defaultValue="https://www.healthhub.sg/health-conditions/children-emergencies, https://www.kkh.com.sg/conditions-treatments"
+              placeholder={harvestingAgentType === 'adp' ? "Enter URL to harvest via Agentic ADP Agent (e.g. https://kidsclinic.sg/pd-guides/health-topics/injuries-in-children/)" : "Comma-separated websites (e.g. https://www.moh.gov.sg/guidelines)"} 
+              className="flex-1 p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#14212B] text-xs focus:border-teal-500 font-mono text-slate-900 dark:text-white"
+              key={harvestingAgentType}
+              defaultValue={harvestingAgentType === 'adp' ? "https://kidsclinic.sg/pd-guides/health-topics/injuries-in-children/" : "https://www.healthhub.sg/health-conditions/children-emergencies, https://www.kkh.com.sg/conditions-treatments"}
             />
             <button
               type="button"
-              disabled={isHarvesting}
+              disabled={isHarvesting || isAdpLoading}
               onClick={async () => {
                 const input = document.getElementById('harvest-websites') as HTMLInputElement;
                 if (!input) return;
-                const urls = input.value.split(',').map(s => s.trim()).filter(Boolean);
-                if (urls.length === 0) return alert('Please enter at least one URL');
-                
+                const rawVal = input.value.trim();
+                if (!rawVal) return alert('Please enter at least one URL');
+
+                if (harvestingAgentType === 'adp') {
+                  // Agentic ADP Agents mode
+                  const targetUrl = rawVal.split(',')[0].trim();
+                  setAdpTargetUrl(targetUrl);
+                  setAdpModalOpen(true);
+                  setIsAdpLoading(true);
+                  setAdpHarvestResult(null);
+
+                  try {
+                    const res = await fetch('/api/agentic/adp-harvest', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        url: targetUrl,
+                        requestId: `ExmjIGL6Oy-${Date.now()}`,
+                        conversationId: 'd4bca75f-e713-42c4-ad37-67b7d6621f10',
+                        appKey: 'ebwZQcRTFXAhmZswRBkWjAEiRAliJwpKftvDYoCymcgOEqtHvTOoiUgAHduWlcfFmbKIxeWeWjoETGCxDGPOHsvcoOEGTcXXSSFJOJqgAzdQCKPUWTvrladChbWFjCwm',
+                        visitorId: '100015179581'
+                      })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      setAdpHarvestResult(data);
+                    } else {
+                      alert(`ADP Harvesting Error: ${data.error || 'Failed to execute ADP pipeline'}`);
+                      setAdpModalOpen(false);
+                    }
+                  } catch (err: any) {
+                    alert(`ADP Request Failed: ${err.message}`);
+                    setAdpModalOpen(false);
+                  } finally {
+                    setIsAdpLoading(false);
+                  }
+                  return;
+                }
+
+                // Local Agents mode
+                const urls = rawVal.split(',').map(s => s.trim()).filter(Boolean);
                 setIsHarvesting(true);
                 try {
                   const res = await fetch('/api/agentic/harvest', {
@@ -383,23 +494,37 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
                   setIsHarvesting(false);
                 }
               }}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200 font-bold text-xs rounded-xl shadow-md transition-all flex items-center space-x-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200 font-bold text-xs rounded-xl shadow-md transition-all flex items-center space-x-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isHarvesting ? (
+              {harvestingAgentType === 'adp' ? (
+                isAdpLoading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin text-teal-400" />
+                    <span>Executing ADP Multi-Agent...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={14} className="text-teal-400" />
+                    <span>Dispatch Agentic ADP Agent</span>
+                  </>
+                )
+              ) : isHarvesting ? (
                 <>
                   <Loader2 size={14} className="animate-spin text-teal-400" />
                   <span>Validating & Harvesting...</span>
                 </>
               ) : (
                 <>
-                  <Sparkles size={14} />
-                  <span>Dispatch Agent to Harvest</span>
+                  <Cpu size={14} />
+                  <span>Dispatch Local Agent</span>
                 </>
               )}
             </button>
           </div>
           <p className="text-[10px] text-slate-500">
-            Provide a list of websites to procure data from. A new agent will go to the provided sites to see if any new rules need to be harvested and inserted into kb_proposals.
+            {harvestingAgentType === 'adp'
+              ? "Provide a URL to process via Tencent Cloud ADP Multi-Agent API. The 4-agent workflow extracts clinical evidence and presents findings in an interactive popup."
+              : "Provide a list of websites to procure data from. A local agent will parse the provided sites to see if any new rules need to be harvested."}
           </p>
         </div>
 
@@ -1118,6 +1243,35 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* ADP Multi-Agent Harvesting Result Popup Modal */}
+      <AdpHarvestResultModal
+        isOpen={adpModalOpen}
+        onClose={() => setAdpModalOpen(false)}
+        isLoading={isAdpLoading}
+        targetUrl={adpTargetUrl}
+        result={adpHarvestResult}
+        onIngestRules={async (rules) => {
+          try {
+            const res = await fetch('/api/agentic/adp-ingest', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ rules })
+            });
+            const data = await res.json();
+            if (data.success) {
+              alert(`Successfully ingested ${data.count} rule(s) into KB proposals for clinician review!`);
+              if (onRefreshProposals) {
+                await onRefreshProposals();
+              }
+            } else {
+              alert(`Failed to ingest rules: ${data.error}`);
+            }
+          } catch (err: any) {
+            alert(`Ingest failed: ${err.message}`);
+          }
+        }}
+      />
     </div>
   );
 };

@@ -1739,6 +1739,247 @@ app.post('/api/agentic/harvest', async (req, res) => {
   }
 });
 
+// ============= Tencent Cloud ADP Multi-Agent Rule Harvesting API =============
+
+app.post('/api/agentic/adp-harvest', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { 
+      url, 
+      requestId = `ExmjIGL6Oy-${Date.now()}`,
+      conversationId = 'd4bca75f-e713-42c4-ad37-67b7d6621f10',
+      appKey = 'ebwZQcRTFXAhmZswRBkWjAEiRAliJwpKftvDYoCymcgOEqtHvTOoiUgAHduWlcfFmbKIxeWeWjoETGCxDGPOHsvcoOEGTcXXSSFJOJqgAzdQCKPUWTvrladChbWFjCwm',
+      visitorId = '100015179581'
+    } = req.body;
+
+    const targetUrl = String(url || '').trim();
+    if (!targetUrl) {
+      return res.status(400).json({ error: 'Please provide a valid URL for ADP harvesting.' });
+    }
+
+    console.log(`[ADP Harvester] Initiating Tencent Cloud ADP API call for: ${targetUrl}`);
+    console.log(`[ADP Harvester] RequestId: ${requestId}, ConversationId: ${conversationId}`);
+
+    const payload = {
+      RequestId: requestId,
+      ConversationId: conversationId,
+      AppKey: appKey,
+      Contents: [
+        {
+          Type: "text",
+          Text: targetUrl
+        }
+      ],
+      VisitorId: visitorId,
+      Incremental: true,
+      EnableMultiIntent: true,
+      Stream: "disable"
+    };
+
+    // Timeout after 3.5 minutes because multi-agent workflow runs 4 sequential agents with Firecrawl
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 210000);
+
+    const adpResponse = await fetch('https://wss.lke.tencentcloud.com/adp/v2/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (!adpResponse.ok) {
+      const errText = await adpResponse.text();
+      return res.status(adpResponse.status).json({
+        success: false,
+        error: `Tencent Cloud ADP API returned HTTP ${adpResponse.status}: ${errText}`
+      });
+    }
+
+    const rawText = await adpResponse.text();
+    const elapsedMs = Date.now() - startTime;
+    console.log(`[ADP Harvester] Received ${rawText.length} bytes in ${(elapsedMs / 1000).toFixed(1)}s`);
+
+    // Parse SSE blocks
+    const blocks = rawText.split(/\r?\n\r?\n/);
+    const events: Array<{ event: string; data: any }> = [];
+
+    for (const block of blocks) {
+      let eventType = '';
+      const dataLines: string[] = [];
+      for (const line of block.split(/\r?\n/)) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          dataLines.push(line.slice(6));
+        }
+      }
+      if (eventType && dataLines.length > 0) {
+        const dataStr = dataLines.join('\n');
+        let parsed = null;
+        try {
+          parsed = JSON.parse(dataStr);
+        } catch {
+          parsed = dataStr;
+        }
+        events.push({ event: eventType, data: parsed });
+      }
+    }
+
+    // Locate response.completed event
+    const completedEvent = events.find(e => e.event === 'response.completed');
+    const respData = (completedEvent?.data as any)?.Response || {};
+    const messages = respData.Messages || [];
+    const workflow = respData.Procedures?.[0]?.Workflow || null;
+    const runNodes = workflow?.RunNodes || [];
+
+    // Extract final reply
+    const replyMsg = messages.find((m: any) => m.Type === 'reply');
+    const finalReply = replyMsg?.Contents?.[0]?.Text || '';
+
+    // Extract parsed rules from End node or Agent4
+    let parsedRules: any[] = [];
+    const endNode = runNodes.find((n: any) => n.NodeName === 'End');
+    if (endNode && endNode.Output) {
+      try {
+        const endOut = typeof endNode.Output === 'string' ? JSON.parse(endNode.Output) : endNode.Output;
+        if (endOut.abracadabra) {
+          parsedRules = typeof endOut.abracadabra === 'string' ? JSON.parse(endOut.abracadabra) : endOut.abracadabra;
+        }
+      } catch (err) {
+        console.warn('[ADP Harvester] Failed parsing End node output:', err);
+      }
+    }
+
+    if (parsedRules.length === 0) {
+      const agent4Node = runNodes.find((n: any) => n.NodeName === 'Agent4');
+      if (agent4Node && agent4Node.Output) {
+        try {
+          const a4Out = typeof agent4Node.Output === 'string' ? JSON.parse(agent4Node.Output) : agent4Node.Output;
+          if (a4Out.Content) {
+            parsedRules = typeof a4Out.Content === 'string' ? JSON.parse(a4Out.Content) : a4Out.Content;
+          }
+        } catch (err) {
+          console.warn('[ADP Harvester] Failed parsing Agent4 node output:', err);
+        }
+      }
+    }
+
+    // Fallback: search raw text for JSON array of knowledge_id
+    if (parsedRules.length === 0) {
+      const arrayMatch = rawText.match(/\[\s*\{\s*"knowledge_id"[\s\S]*?\}\s*\]/);
+      if (arrayMatch) {
+        try {
+          parsedRules = JSON.parse(arrayMatch[0]);
+        } catch {}
+      }
+    }
+
+    // Format nodes for frontend visualization
+    const formattedNodes = runNodes.map((n: any) => {
+      let contentText = '';
+      if (n.Output) {
+        try {
+          const parsed = typeof n.Output === 'string' ? JSON.parse(n.Output) : n.Output;
+          contentText = parsed.Content || parsed.abracadabra || JSON.stringify(parsed, null, 2);
+        } catch {
+          contentText = String(n.Output);
+        }
+      }
+      return {
+        nodeId: n.NodeId,
+        nodeName: n.NodeName,
+        status: n.Status === 2 ? 'success' : 'running',
+        elapsedMs: parseInt(n.Elapsed || '0', 10),
+        tokens: n.StatInfos?.[0]?.TotalTokens || 0,
+        content: contentText,
+        outputRef: n.OutputRef || ''
+      };
+    });
+
+    res.json({
+      success: true,
+      requestId,
+      conversationId,
+      targetUrl,
+      elapsedMs,
+      parsedRules,
+      workflowNodes: formattedNodes,
+      messages,
+      finalReply,
+      rawOutput: rawText
+    });
+  } catch (err: any) {
+    console.error('[ADP Harvester] Execution error:', err);
+    res.status(500).json({
+      success: false,
+      error: err.name === 'AbortError' ? 'ADP Request timed out after 3.5 minutes' : err.message
+    });
+  }
+});
+
+// Ingest ADP harvested rules directly into kb_proposals table
+app.post('/api/agentic/adp-ingest', async (req, res) => {
+  try {
+    const { rules } = req.body;
+    if (!rules || !Array.isArray(rules) || rules.length === 0) {
+      return res.status(400).json({ error: 'No rules provided to ingest.' });
+    }
+
+    const savedProposals: any[] = [];
+    const now = new Date().toISOString();
+
+    for (let i = 0; i < rules.length; i++) {
+      const r = rules[i];
+      const safeId = r.knowledge_id 
+        ? `kb-prop-adp-${r.knowledge_id.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+        : `kb-prop-adp-${Date.now()}-${i}`;
+
+      const isNonConforming = r.review_decision === 'APPROVE_WITH_CONDITIONS' || r.review_decision === 'REQUEST_REVISION' || r.review_decision === 'ESCALATE_TO_HUMAN_PHYSICIAN';
+
+      const proposal = {
+        id: safeId,
+        title: r.title ? `${isNonConforming ? '⚠️ Review Needed: ' : 'Auto-Harvested: '}${r.title}` : `Harvested Clinical Rule #${i + 1}`,
+        ruleCodeSnippet: r.rule_code_snippet || `if (context.${r.knowledge_id?.toLowerCase() || 'symptom'}) return EMERGENCY_HALT('HARVEST-${r.knowledge_id || 'RULE'}');`,
+        rationale: r.rationale || r.review_rationale || 'Extracted and verified by Tencent Cloud ADP Multi-Agent Harvester Pipeline.',
+        diff: {
+          originalText: r.original_text || '',
+          reviewDecision: r.review_decision || 'APPROVED',
+          reviewRationale: r.review_rationale || '',
+          identifiedRisks: r.identified_risks || [],
+          knowledgeId: r.knowledge_id
+        },
+        sourceDoc: r.source_doc || '',
+        category: isNonConforming ? '⚠️ Non-Conforming CPG' : 'Auto-Harvested',
+        targetTier: r.target_tier || 'Tier 1 Deterministic Red-Line',
+        ageBand: r.age_band || 'pediatric',
+        originatingAgent: '@adp_multiagent',
+        confidenceScore: typeof r.confidence_score === 'number' ? (r.confidence_score > 1 ? r.confidence_score / 100 : r.confidence_score) : 0.85,
+        status: 'pending_review' as const,
+        timestamp: now,
+        verifiedSource: r.verified_source || 'Tencent Cloud ADP',
+        originalText: r.original_text || '',
+        requiresClinicianReview: isNonConforming || Boolean(r.requires_clinician_review),
+        clinicianReviewReason: r.review_rationale || (isNonConforming ? `ADP Medical Reviewer flagged: ${r.review_decision}` : '')
+      };
+
+      db.saveProposal(proposal);
+      savedProposals.push(proposal);
+    }
+
+    res.json({
+      success: true,
+      count: savedProposals.length,
+      proposals: savedProposals,
+      message: `Successfully ingested ${savedProposals.length} rules into pending governance proposals!`
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // =========================================================================
 // Home & First-Aid Medication Governance APIs
 // =========================================================================
