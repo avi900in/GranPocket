@@ -43,8 +43,23 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handlePostalLookup = () => {
+  const handlePostalLookup = async () => {
     if (!postalCode.trim()) return;
+    const cleanDigits = postalCode.trim().replace(/[^0-9]/g, '');
+    if (cleanDigits.length === 6) {
+      try {
+        const resp = await fetch(
+          `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${cleanDigits}&returnGeom=Y&getAddrDetails=Y`
+        );
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json.results && json.results.length > 0) {
+            setAddressText(json.results[0].ADDRESS || json.results[0].BUILDING);
+            return;
+          }
+        }
+      } catch {}
+    }
     const res = lookupSingaporePostalCode(postalCode);
     if (res) {
       setAddressText(res.address);

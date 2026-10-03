@@ -104,6 +104,13 @@ export function lookupSingaporePostalCode(postalCode: string): {
       lng: 103.8188,
     };
   }
+  if (clean.startsWith('26') || clean.startsWith('27')) {
+    return {
+      address: `Holland Road / Leedon Heights, Singapore ${clean}`,
+      lat: 1.3151,
+      lng: 103.8020,
+    };
+  }
   if (clean.startsWith('16')) {
     return {
       address: `Outram Road / Chinatown, Singapore ${clean}`,

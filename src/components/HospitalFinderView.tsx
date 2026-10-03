@@ -146,7 +146,42 @@ export const HospitalFinderView: React.FC<HospitalFinderViewProps> = ({
     e.preventDefault();
     if (!postalInput.trim()) return;
 
-    // First try fast offline Singapore postal code lookup
+    // Try Singapore Government OneMap official API for precise 6-digit postal code coordinates
+    const cleanDigits = postalInput.trim().replace(/[^0-9]/g, '');
+    if (cleanDigits.length === 6) {
+      try {
+        setIsLocating(true);
+        const resp = await fetch(
+          `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${cleanDigits}&returnGeom=Y&getAddrDetails=Y`
+        );
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json.results && json.results.length > 0) {
+            const first = json.results[0];
+            const lat = parseFloat(first.LATITUDE);
+            const lng = parseFloat(first.LONGITUDE);
+            if (!isNaN(lat) && !isNaN(lng)) {
+              setActiveLat(lat);
+              setActiveLng(lng);
+              setResolvedAddress(first.ADDRESS || first.BUILDING || `Singapore ${cleanDigits}`);
+              setLocationSource('search');
+              setLocationError(null);
+              if (mapInstanceRef.current) {
+                mapInstanceRef.current.setView([lat, lng], 14, { animate: true });
+              }
+              setIsLocating(false);
+              return;
+            }
+          }
+        }
+      } catch {
+        // Fall through to local
+      } finally {
+        setIsLocating(false);
+      }
+    }
+
+    // Try fast offline Singapore postal code lookup
     const localResult = lookupSingaporePostalCode(postalInput);
     if (localResult) {
       setActiveLat(localResult.lat);
@@ -223,14 +258,14 @@ export const HospitalFinderView: React.FC<HospitalFinderViewProps> = ({
     });
   }, [facilitiesWithDistance, typeFilter, insurerFilter]);
 
-  // Identify Nearest Emergency Hospital & Nearest Urgent Clinic
+  // Identify Nearest Emergency Hospital & Nearest Clinic / UCC
   const nearestEmergencyHospital = useMemo(() => {
     return facilitiesWithDistance.find(f => f.hasED);
   }, [facilitiesWithDistance]);
 
   const nearestUrgentClinic = useMemo(() => {
-    return facilitiesWithDistance.find(f => !f.hasED && f.hours.toLowerCase().includes('24')) 
-      || facilitiesWithDistance.find(f => f.type === 'polyclinic' || f.type === '24hr_clinic');
+    // Find closest non-emergency clinic/polyclinic so spotlight card and list order are 100% consistent
+    return facilitiesWithDistance.find(f => !f.hasED && (f.type === 'polyclinic' || f.type === '24hr_clinic' || f.type === 'urgent_care' || !f.hasED));
   }, [facilitiesWithDistance]);
 
   // Initialize and Update Leaflet Real Map
