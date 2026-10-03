@@ -675,6 +675,51 @@ export default function App() {
     }
   }, [dueJobs, dismissedAlertIds, activeAlertToast, currentUser, eligibleAlertMembers]);
 
+  // Dynamically filter members visible in Family Profiles based on active role capabilities (Section 3 & 9: view_own_profile & view_others_profile)
+  const eligibleProfileMembers = useMemo(() => {
+    if (!currentUser) return currentHouseholdMembers;
+    const ownScope = activeRolePerms?.capabilities?.view_own_profile || 'none';
+    const othersScope = activeRolePerms?.capabilities?.view_others_profile || 'none';
+
+    if (othersScope === 'full') {
+      return currentHouseholdMembers;
+    }
+
+    return currentHouseholdMembers.filter(member => {
+      // 1. Viewing own profile
+      if (member.id === currentUser.id) {
+        return ownScope !== 'none';
+      }
+      // 2. Viewing others' profiles
+      if (othersScope === 'care_recipients') {
+        return member.careLinks?.some(link => link.caregiverPersonId === currentUser.id);
+      }
+      return false;
+    });
+  }, [currentHouseholdMembers, currentUser, activeRolePerms]);
+
+  // Ensure selectedPerson is always an eligible member for current persona in triage and profile
+  useEffect(() => {
+    if (eligibleProfileMembers.length > 0 && !eligibleProfileMembers.some(m => m.id === selectedPerson.id)) {
+      setSelectedPerson(eligibleProfileMembers[0]);
+    }
+  }, [eligibleProfileMembers, selectedPerson.id]);
+
+  // Dynamically filter audit logs for Audit & PDPA based on active role capabilities (Section 3 & 9: view_inquiry_results)
+  const eligibleAuditLogs = useMemo(() => {
+    if (!currentUser) return auditLogs;
+    const historyScope = activeRolePerms?.capabilities?.view_inquiry_results || 'none';
+    if (historyScope === 'full') return auditLogs;
+
+    const allowedNames = new Set(eligibleProfileMembers.map(m => m.name.toLowerCase()));
+    return auditLogs.filter(log => {
+      const lowerRes = (log.resource || '').toLowerCase();
+      const lowerActor = (log.actor || '').toLowerCase();
+      if (log.action?.includes('SYSTEM') || log.action?.includes('POLICY')) return true;
+      return Array.from(allowedNames).some(name => lowerRes.includes(name) || lowerActor.includes(name));
+    });
+  }, [auditLogs, eligibleProfileMembers, currentUser, activeRolePerms]);
+
   // Reconcile activeTab whenever persona or allowedScreens changes based on DB permissions
   useEffect(() => {
     if (isLoggedIn && allowedScreens.length > 0) {
@@ -1368,9 +1413,12 @@ export default function App() {
             {activeTab === 'family' && (
               <FamilyProfilesView
                 household={household}
-                members={currentHouseholdMembers}
+                members={eligibleProfileMembers}
                 selectedPerson={selectedPerson}
                 currentUser={currentUser}
+                canEditHousehold={activeRolePerms?.capabilities?.edit_household === 'full'}
+                canManageCareLinks={activeRolePerms?.capabilities?.manage_care_links === 'full'}
+                totalHouseholdCount={currentHouseholdMembers.length}
                 onSelectPerson={setSelectedPerson}
                 onUpdatePerson={handleUpdatePerson}
                 onAddMember={handleAddMember}
@@ -1381,11 +1429,11 @@ export default function App() {
               />
             )}
 
-            {/* TAB 3: Medication Log */}
+            {/* TAB 3: Customer Feedback */}
             {activeTab === 'feedback' && (
               <CustomerFeedbackView
                 household={household}
-                members={members}
+                members={eligibleProfileMembers}
                 selectedPerson={selectedPerson}
               />
             )}
@@ -1477,9 +1525,12 @@ export default function App() {
             {/* TAB 7: PDPA & Audit Log */}
             {activeTab === 'pdpa_audit' && (
               <AuditAndPdpaView
-                auditLogs={auditLogs}
+                auditLogs={eligibleAuditLogs}
                 household={household}
-                members={currentHouseholdMembers}
+                members={eligibleProfileMembers}
+                currentUser={currentUser}
+                exportDataScope={activeRolePerms?.capabilities?.export_delete_data || 'none'}
+                totalHouseholdCount={currentHouseholdMembers.length}
                 language={language}
               />
             )}

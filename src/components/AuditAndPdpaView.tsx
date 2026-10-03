@@ -19,6 +19,9 @@ interface AuditAndPdpaViewProps {
   household: Household;
   members: Person[];
   language: Language;
+  currentUser?: Person | null;
+  exportDataScope?: 'full' | 'care_recipients' | 'own' | 'none';
+  totalHouseholdCount?: number;
 }
 
 export const AuditAndPdpaView: React.FC<AuditAndPdpaViewProps> = ({
@@ -26,24 +29,45 @@ export const AuditAndPdpaView: React.FC<AuditAndPdpaViewProps> = ({
   household,
   members,
   language,
+  currentUser,
+  exportDataScope = 'full',
+  totalHouseholdCount,
 }) => {
   const [downloadSuccess, setDownloadSuccess] = useState(false);
   const [deletedSuccess, setDeletedSuccess] = useState(false);
+  const isRestrictedByRbac = totalHouseholdCount !== undefined && members.length < totalHouseholdCount;
 
   const handleExportData = () => {
-    const dataToExport = {
-      exportDate: new Date().toISOString(),
-      regime: 'Singapore Personal Data Protection Act (PDPA 2012)',
-      household,
-      members,
-      auditLogs,
-    };
+    if (exportDataScope === 'none') {
+      alert('Action not permitted: Caregivers cannot export household records under PDPA Section 3 & 9.');
+      return;
+    }
+
+    const dataToExport = exportDataScope === 'own'
+      ? {
+          exportDate: new Date().toISOString(),
+          regime: 'Singapore Personal Data Protection Act (PDPA 2012) - Individual Access Request',
+          member: currentUser,
+          medicalProfile: currentUser?.medicalProfile,
+          auditLogs: auditLogs.filter(l => 
+            (l.resource && l.resource.toLowerCase().includes(currentUser?.name.toLowerCase() || '')) ||
+            (l.actor && l.actor.toLowerCase().includes(currentUser?.name.toLowerCase() || ''))
+          ),
+        }
+      : {
+          exportDate: new Date().toISOString(),
+          regime: 'Singapore Personal Data Protection Act (PDPA 2012) - Full Household Access Request',
+          household,
+          members,
+          auditLogs,
+        };
 
     const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `GranPocket-Health-Export-${new Date().toISOString().slice(0, 10)}.json`;
+    const sanitizedName = currentUser?.name ? currentUser.name.replace(/\s+/g, '_') : 'Household';
+    a.download = `GranPocket-${exportDataScope === 'own' ? `MyRecord-${sanitizedName}` : 'Household-Export'}-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
 
@@ -52,7 +76,12 @@ export const AuditAndPdpaView: React.FC<AuditAndPdpaViewProps> = ({
   };
 
   const handleDeleteDataSimulation = () => {
-    if (window.confirm('Simulate right-to-be-forgotten deletion? All temporary logs will be purged from memory.')) {
+    if (exportDataScope === 'none') {
+      alert('Action not permitted: Caregivers cannot request data erasure under Section 3 & 9.');
+      return;
+    }
+    const targetLabel = exportDataScope === 'own' ? 'your personal data' : 'household temporary logs';
+    if (window.confirm(`Simulate right-to-be-forgotten deletion for ${targetLabel}?`)) {
       setDeletedSuccess(true);
       setTimeout(() => setDeletedSuccess(false), 3000);
     }
@@ -63,7 +92,7 @@ export const AuditAndPdpaView: React.FC<AuditAndPdpaViewProps> = ({
       {/* Header */}
       <div className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-7 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div className="space-y-1">
             <h2 className="text-xl font-black text-slate-900 flex items-center space-x-2">
               <Lock className="text-teal-600" size={22} />
               <span>Singapore PDPA Compliance & Immutable Audit Log</span>
@@ -77,23 +106,55 @@ export const AuditAndPdpaView: React.FC<AuditAndPdpaViewProps> = ({
                 }
               />
             </h2>
+            {isRestrictedByRbac && (
+              <div className="flex items-center gap-1.5 text-xs text-blue-700 dark:text-blue-400 font-bold mt-1">
+                <ShieldCheck size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                <span>RBAC Scoped: Audit trail and consent logs scoped to authorized family members per Section 3 & 9</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center space-x-2">
-            <button
-              onClick={handleExportData}
-              className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow transition-all"
-            >
-              <Download size={14} />
-              <span>{downloadSuccess ? 'Exported JSON' : 'Export Records (JSON)'}</span>
-            </button>
-            <button
-              onClick={handleDeleteDataSimulation}
-              className="flex items-center space-x-1.5 px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all"
-            >
-              <Trash2 size={14} />
-              <span>{deletedSuccess ? 'Purged' : 'Right to be Forgotten'}</span>
-            </button>
+            {exportDataScope === 'none' ? (
+              <div className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700">
+                <Lock size={13} />
+                <span>Export & Erasure: Admin Only (Section 3 & 9)</span>
+              </div>
+            ) : exportDataScope === 'own' ? (
+              <>
+                <button
+                  onClick={handleExportData}
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow transition-all"
+                >
+                  <Download size={14} />
+                  <span>{downloadSuccess ? 'Exported JSON' : 'Export My Record (JSON)'}</span>
+                </button>
+                <button
+                  onClick={handleDeleteDataSimulation}
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all"
+                >
+                  <Trash2 size={14} />
+                  <span>{deletedSuccess ? 'Purged' : 'Purge My Data'}</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={handleExportData}
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow transition-all"
+                >
+                  <Download size={14} />
+                  <span>{downloadSuccess ? 'Exported JSON' : 'Export Records (JSON)'}</span>
+                </button>
+                <button
+                  onClick={handleDeleteDataSimulation}
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all"
+                >
+                  <Trash2 size={14} />
+                  <span>{deletedSuccess ? 'Purged' : 'Right to be Forgotten'}</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 

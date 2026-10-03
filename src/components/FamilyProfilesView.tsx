@@ -39,6 +39,9 @@ interface FamilyProfilesViewProps {
   onSwitchHousehold?: (householdId: string) => void;
   onResetDemoData?: () => void;
   currentUser?: Person | null;
+  canEditHousehold?: boolean;
+  canManageCareLinks?: boolean;
+  totalHouseholdCount?: number;
 }
 
 export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
@@ -53,7 +56,12 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
   onSwitchHousehold,
   onResetDemoData,
   currentUser,
+  canEditHousehold = false,
+  canManageCareLinks = false,
+  totalHouseholdCount,
 }) => {
+  const isRestrictedByRbac = totalHouseholdCount !== undefined && members.length < totalHouseholdCount;
+  const canEditCurrentSubject = canEditHousehold || selectedPerson.id === currentUser?.id;
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
 
@@ -366,27 +374,42 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
           <p className="text-xs text-slate-500">
             Primary Home: {household.addresses[0]?.text}
           </p>
+          {isRestrictedByRbac && (
+            <div className="flex items-center gap-1.5 text-xs text-blue-700 dark:text-blue-400 font-bold mt-1">
+              <ShieldCheck size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+              <span>RBAC Scoped: Viewing {members.length} of {totalHouseholdCount} Family Profiles (Care Recipients Only per Section 3 & 9)</span>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          <button
-            type="button"
-            onClick={() => setShowAddModal(true)}
-            disabled={members.length >= 10}
-            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow transition-all min-h-[40px]"
-          >
-            <UserPlus size={14} />
-            <span>Add Member</span>
-          </button>
+          {canEditHousehold && (
+            <button
+              type="button"
+              onClick={() => setShowAddModal(true)}
+              disabled={members.length >= 10}
+              className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow transition-all min-h-[40px]"
+            >
+              <UserPlus size={14} />
+              <span>Add Member</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => handleOpenEdit(selectedPerson)}
-            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow transition-all min-h-[40px]"
-          >
-            <Edit3 size={14} />
-            <span>Edit Profile</span>
-          </button>
+          {canEditCurrentSubject ? (
+            <button
+              type="button"
+              onClick={() => handleOpenEdit(selectedPerson)}
+              className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow transition-all min-h-[40px]"
+            >
+              <Edit3 size={14} />
+              <span>Edit Profile</span>
+            </button>
+          ) : (
+            <span className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 bg-slate-100 text-slate-500 rounded-xl text-xs font-bold border border-slate-200 min-h-[40px]">
+              <Lock size={13} />
+              <span>Read Only Profile</span>
+            </span>
+          )}
 
           {onResetDemoData && (
             <button
@@ -429,6 +452,7 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
                 <div className="text-2xl mb-1">{member.avatar || '👤'}</div>
                 <div className="font-extrabold text-xs sm:text-sm text-slate-900 leading-tight truncate">
                   {member.name}
+                  {member.id === currentUser?.id ? ' (Self)' : member.careLinks?.some(cl => cl.caregiverPersonId === currentUser?.id) ? ' (Care Recipient)' : ''}
                 </div>
                 <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                   {member.relationshipLabel} • {getAgeDisplay(member.dob, language)}
@@ -436,13 +460,20 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
               </button>
 
               <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                <button
-                  onClick={() => handleOpenEdit(member)}
-                  className="font-bold text-teal-700 hover:text-teal-900 hover:underline flex items-center space-x-1"
-                >
-                  <Edit3 size={11} />
-                  <span>Edit</span>
-                </button>
+                {(canEditHousehold || member.id === currentUser?.id) ? (
+                  <button
+                    onClick={() => handleOpenEdit(member)}
+                    className="font-bold text-teal-700 hover:text-teal-900 hover:underline flex items-center space-x-1"
+                  >
+                    <Edit3 size={11} />
+                    <span>Edit</span>
+                  </button>
+                ) : (
+                  <span className="text-slate-400 font-medium flex items-center space-x-1">
+                    <Lock size={11} />
+                    <span>Read Only</span>
+                  </span>
+                )}
                 {member.medicalProfile.allergies.length > 0 && (
                   <span className="text-rose-600 font-bold" title="Documented allergies">
                     ⚠️ Allergy
@@ -617,13 +648,15 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
                 <Pill size={15} className="text-teal-600" />
                 <span>Current Medications ({selectedPerson.medicalProfile.medications.length})</span>
               </span>
-              <button 
-                onClick={() => handleOpenEdit(selectedPerson)} 
-                className="text-teal-700 hover:text-teal-900 font-bold text-[11px] bg-teal-50 px-2 py-0.5 rounded border border-teal-200 flex items-center space-x-1"
-              >
-                <Plus size={12} />
-                <span>Add / Edit</span>
-              </button>
+              {canEditCurrentSubject && (
+                <button 
+                  onClick={() => handleOpenEdit(selectedPerson)} 
+                  className="text-teal-700 hover:text-teal-900 font-bold text-[11px] bg-teal-50 px-2 py-0.5 rounded border border-teal-200 flex items-center space-x-1"
+                >
+                  <Plus size={12} />
+                  <span>Add / Edit</span>
+                </button>
+              )}
             </div>
             {selectedPerson.medicalProfile.medications.length > 0 ? (
               <div className="space-y-2">
@@ -639,27 +672,31 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
                         <div className="text-[10px] text-slate-400 italic">For: {m.indications}</div>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveMedicationDirect(m.id)}
-                      className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition-colors shrink-0"
-                      title="Remove medication"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    {canEditCurrentSubject && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMedicationDirect(m.id)}
+                        className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition-colors shrink-0"
+                        title="Remove medication"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
             ) : (
               <div className="p-3 bg-white rounded-xl border border-dashed border-slate-300 text-center">
                 <p className="text-xs text-slate-400 italic mb-1.5">No regular medications listed.</p>
-                <button
-                  type="button"
-                  onClick={() => handleOpenEdit(selectedPerson)}
-                  className="text-xs font-bold text-teal-700 hover:underline"
-                >
-                  + Add Medication (e.g. Paracetamol, Aspirin)
-                </button>
+                {canEditCurrentSubject && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEdit(selectedPerson)}
+                    className="text-xs font-bold text-teal-700 hover:underline"
+                  >
+                    + Add Medication (e.g. Paracetamol, Aspirin)
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -671,9 +708,11 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
                 <ShieldCheck size={15} className="text-indigo-600" />
                 <span>Insurance Coverage</span>
               </span>
-              <button onClick={() => handleOpenEdit(selectedPerson)} className="text-teal-700 hover:underline text-[11px] font-semibold">
-                + Edit
-              </button>
+              {canEditHousehold && (
+                <button onClick={() => handleOpenEdit(selectedPerson)} className="text-teal-700 hover:underline text-[11px] font-semibold">
+                  + Edit
+                </button>
+              )}
             </div>
             {selectedPerson.insurance ? (
               <div className="bg-white p-3 rounded-xl border border-slate-200 text-xs space-y-2">
@@ -720,7 +759,7 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
               <Users size={14} className="text-teal-700" />
               <span>Assigned Caregivers ({selectedPerson.careLinks?.length || 0})</span>
             </span>
-            {(currentUser?.systemRole === 'ADMIN' || currentUser?.systemRole === 'APP_OWNER') && (
+            {canManageCareLinks && (
               <button 
                 onClick={() => setShowCaregiverModal(true)}
                 className="text-teal-700 hover:text-teal-900 font-bold text-[11px] bg-teal-50 px-2 py-0.5 rounded border border-teal-200 flex items-center space-x-1"
