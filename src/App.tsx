@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { 
   Person, 
   Household, 
@@ -565,6 +565,29 @@ export default function App() {
   const activeUserRole: SystemRole = (currentUser?.systemRole as SystemRole) || 'MEMBER';
   const activeRolePerms = rolePermissions[activeUserRole] || DEFAULT_ROLE_PERMISSIONS[activeUserRole] || DEFAULT_ROLE_PERMISSIONS.MEMBER;
   const allowedScreens: ScreenKey[] = activeRolePerms?.allowedScreens || [];
+
+  // Dynamically filter eligible triage subjects based on active role capabilities (Section 3 & 9 Architecture Capability Specification)
+  const eligibleTriageMembers = useMemo(() => {
+    if (!currentUser) return currentHouseholdMembers;
+    const inquirySelfScope = activeRolePerms?.capabilities?.inquiry_self || 'own';
+    const inquiryOthersScope = activeRolePerms?.capabilities?.inquiry_others || 'none';
+
+    return currentHouseholdMembers.filter(member => {
+      // 1. Assessing oneself
+      if (member.id === currentUser.id) {
+        return inquirySelfScope !== 'none';
+      }
+      // 2. Assessing others: check capability scope
+      if (inquiryOthersScope === 'full') {
+        return true;
+      }
+      if (inquiryOthersScope === 'care_recipients') {
+        // Must be a designated care recipient linked via careLinks
+        return member.careLinks?.some(link => link.caregiverPersonId === currentUser.id);
+      }
+      return false;
+    });
+  }, [currentHouseholdMembers, currentUser, activeRolePerms]);
 
   // Reconcile activeTab whenever persona or allowedScreens changes based on DB permissions
   useEffect(() => {
@@ -1212,7 +1235,9 @@ export default function App() {
               triageStep === 'select_patient' ? (
                 <WhoIsUnwellStep
                   currentUser={currentUser || currentHouseholdMembers[0]}
-                  members={currentHouseholdMembers}
+                  members={eligibleTriageMembers}
+                  totalHouseholdCount={currentHouseholdMembers.length}
+                  canAddMember={activeRolePerms?.capabilities?.edit_household === 'full'}
                   onSelectSubject={(subject) => {
                     setSelectedPerson(subject);
                     setCurrentResult(null);
