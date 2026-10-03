@@ -829,9 +829,16 @@ export async function executeDynamicKnowledgeAgent(
           return true;
         }
       }
+      if (lowerRaw.includes('breath') || lowerRaw.includes('choke') || lowerRaw.includes('chest')) {
+        if (r.ailment === 'breathing_difficulty' || r.ailment === 'chest_pain' || r.bodyPart?.toLowerCase().includes('respir') || r.bodyPart?.toLowerCase().includes('cardio')) {
+          return true;
+        }
+      }
     }
     return false;
   });
+
+  console.log(`[Agentic Triage] @knowledge_agent -> Query Shape: ${queryShape}, Retrieved ${matchedRules.length} CPG rules from SQLite`);
 
   if (matchedRules.length === 0) {
     const lowerRaw = (rawText || '').toLowerCase();
@@ -908,8 +915,11 @@ Active Answers: ${JSON.stringify(answers)}
 Retrieved CPG Rules from SQLite: ${hasMatchedRules ? JSON.stringify(matchedRules.map((r: TriageRule) => ({ id: r.ruleId, severity: r.severity, rationale: r.rationale }))) : 'None (Zero CPG rules matched in knowledge base)'}
 ${revisionFeedback ? `MANDATORY REVISION REQUEST FROM SENIOR DOCTOR: "${revisionFeedback}"` : ''}`;
 
+  console.log(`[Agentic Triage] @triage_agent -> Generating draft. Rules matched in DB: ${hasMatchedRules}`);
+
   const fallback = () => {
     if (!topRule) {
+      console.log(`[Agentic Triage] @triage_agent -> FALLBACK: Zero CPG rules matched. Outputting "unable to provide suggestion".`);
       return {
         classification: 'TELEDOCTOR' as const,
         mappedSeverity: 'YELLOW' as Severity,
@@ -923,6 +933,8 @@ ${revisionFeedback ? `MANDATORY REVISION REQUEST FROM SENIOR DOCTOR: "${revision
         appliedRuleIds: [],
       };
     }
+    
+    console.log(`[Agentic Triage] @triage_agent -> Drafting triage classification based on top rule ${topRule.ruleId} (${topRule.severity})`);
 
     let classification: 'EMERGENCY' | 'TELEDOCTOR' | 'HOME_MONITOR' = 'HOME_MONITOR';
     let mappedSeverity: Severity = topRule.severity;
@@ -1166,6 +1178,10 @@ export async function executeDynamicAgenticPipeline(input: DynamicAgenticInput) 
   const stateTransitions: any[] = [];
   let step = 1;
   const executionId = 'exec-' + uuidv4();
+
+  console.log(`\n[Agentic Triage] ====== STARTING AGENTIC PIPELINE (EXEC ID: ${executionId}) ======`);
+  console.log(`[Agentic Triage] Input Text: "${text}"`);
+  console.log(`[Agentic Triage] Patient Profile: Age ${person.dob}, Conditions: ${person.conditions?.join(',') || 'none'}`);
 
   // -----------------------------------------------------------------------
   // STEP 1.0: Deterministic Override from Approved KB Proposals
