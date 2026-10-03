@@ -2026,7 +2026,10 @@ export function getWhenToWorry(severity: Severity, ailmentCode: string | undefin
 }
 
 // ===== Question Trees for the 16 Ailments (SRS §7.3, §7.5) =====
-export function getQuestionTree(ailmentCode: string): QuestionStep[] {
+export function getQuestionTree(ailmentCode: string, person?: Person | null): QuestionStep[] {
+  const ageCat = person?.dob ? getAgeBand(person.dob) : 'adult';
+  const isBabyOrToddler = ageCat === 'neonate' || ageCat === 'young_infant' || ageCat === 'infant' || ageCat === 'toddler';
+
   const trees: Record<string, QuestionStep[]> = {
     fever: [
       {
@@ -2040,28 +2043,76 @@ export function getQuestionTree(ailmentCode: string): QuestionStep[] {
         min: 35.0,
         max: 42.0,
         step: 0.1,
-        helpText: 'Use a digital thermometer under the armpit, forehead, or ear.',
+        helpText: isBabyOrToddler
+          ? 'Use a digital thermometer under the armpit, forehead, or ear. Infant normal is 36.5–37.5°C.'
+          : 'Use a digital thermometer under the armpit, forehead, or ear.',
       },
       {
         id: 'drowsy',
         textKey: 'q.fever.drowsy',
-        text: 'Is the person abnormally drowsy, unusually limp, or hard to wake up?',
-        textZh: '病人是否异常嗜睡、全身软弱无力或难以唤醒？',
-        textMs: 'Adakah orang tersebut luar biasa mengantuk, lembik, atau susah dikejutkan?',
+        text: isBabyOrToddler
+          ? 'Is the baby unusually limp, hard to wake, or weak/floppy?'
+          : 'Is the person abnormally drowsy, unusually limp, or hard to wake up?',
+        textZh: isBabyOrToddler
+          ? '婴儿是否异常嗜睡、四肢瘫软无力或难以唤醒？'
+          : '病人是否异常嗜睡、全身软弱无力或难以唤醒？',
+        textMs: isBabyOrToddler
+          ? 'Adakah bayi sangat lembik, tidak bermaya, atau sukar dikejutkan?'
+          : 'Adakah orang tersebut luar biasa mengantuk, lembik, atau susah dikejutkan?',
         answerType: 'yes_no',
         redFlagIf: ['yes', true],
       },
       {
         id: 'fluids',
         textKey: 'q.fever.fluids',
-        text: 'How is fluid intake and urination?',
-        textZh: '饮水和排尿情况如何？',
-        textMs: 'Bagaimanakah pengambilan cecair dan kencing?',
+        text: isBabyOrToddler
+          ? 'How is feeding and wet diapers?'
+          : 'How is fluid intake and urination?',
+        textZh: isBabyOrToddler
+          ? '进食吸奶与湿尿布情况如何？'
+          : '饮水和排尿情况如何？',
+        textMs: isBabyOrToddler
+          ? 'Bagaimanakah penyusuan dan lampin basah?'
+          : 'Bagaimanakah pengambilan cecair dan kencing?',
         answerType: 'choice',
-        options: ['Drinking well & normal wet diapers/urine', 'Drinking less than usual', 'Refusing all fluids / dry diapers > 8 hours'],
-        optionsZh: ['饮水良好且排尿正常', '比平时喝得少', '拒绝饮水 / 8小时以上无湿尿布或排尿'],
-        optionsMs: ['Minum baik & kencing normal', 'Kurang minum daripada biasa', 'Enggan minum / tiada lampin basah > 8 jam'],
-        redFlagIf: ['Refusing all fluids / dry diapers > 8 hours'],
+        options: isBabyOrToddler
+          ? [
+              'Feeding/drinking well & normal wet diapers',
+              'Drinking less than usual',
+              'Refusing all fluids / dry diapers > 6-8 hours',
+            ]
+          : [
+              'Drinking well & normal urination',
+              'Drinking less than usual / dark urine',
+              'Unable to keep fluids down / no urination > 8-12 hours',
+            ],
+        optionsZh: isBabyOrToddler
+          ? [
+              '进食良好且湿尿布正常',
+              '比平时吃/喝得少',
+              '拒绝进食饮水 / 6-8小时以上无湿尿布',
+            ]
+          : [
+              '饮水良好且排尿正常',
+              '比平时喝得少 / 尿液深黄',
+              '无法摄入液体 / 8-12小时以上无排尿',
+            ],
+        optionsMs: isBabyOrToddler
+          ? [
+              'Menyusu baik & lampin basah normal',
+              'Kurang minum daripada biasa',
+              'Enggan minum / tiada lampin basah > 6-8 jam',
+            ]
+          : [
+              'Minum baik & kencing normal',
+              'Kurang minum daripada biasa / kencing pekat',
+              'Tidak boleh minum / tiada kencing > 8-12 jam',
+            ],
+        redFlagIf: [
+          'Refusing all fluids / dry diapers > 6-8 hours',
+          'Unable to keep fluids down / no urination > 8-12 hours',
+          'Refusing all fluids / dry diapers > 8 hours',
+        ],
       },
       {
         id: 'stiff_neck',

@@ -129,7 +129,7 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
       return;
     }
 
-    const tree = getQuestionTree(ailment.code);
+    const tree = getQuestionTree(ailment.code, person);
     if (tree.length === 0) {
       const res = runTriage({
         text: textInput,
