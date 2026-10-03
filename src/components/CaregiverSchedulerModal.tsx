@@ -58,7 +58,7 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
     
     // Dispatch actual SMS via Twilio using the Caregiver Phone
     const contactPhone = job.caregiverPhone || '+65 91234567';
-    const alertMessage = `GranPocket Scheduled Reminder for ${job.caregiverName}: ${job.title} - ${job.summary}`;
+    const alertMessage = `GranPocket Scheduled Reminder for ${job.caregiverName}: ${job.title} - ${job.description}`;
     await sendSms(contactPhone, alertMessage);
     
     setTestTriggerSuccess(`Simulated alert successfully dispatched to ${job.caregiverName} via SMS & In-app!`);
