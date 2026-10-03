@@ -1332,6 +1332,11 @@ export function runTriage(input: {
     customRules = [],
   } = input;
 
+  console.log(`[Triage Engine] ====== Starting runTriage() ======`);
+  console.log(`[Triage Engine] Ailment Code: ${ailmentCode}`);
+  console.log(`[Triage Engine] Input Text: "${text}"`);
+  console.log(`[Triage Engine] Patient Profile loaded: Age ${person.dob}, Conditions: ${person.conditions?.join(',') || 'None'}`);
+
   const triggeredRules: string[] = [];
   const reasons: string[] = [];
   let severity: Severity = 'GREEN';
@@ -1370,6 +1375,7 @@ export function runTriage(input: {
     let matched = false;
     for (const cond of conditions) {
       if (evaluateCondition(cond, answers)) {
+        console.log(`[Triage Engine] Step 2: Rule matched! RuleId: ${rule.ruleId}, Condition: ${cond}, AnswerData:`, answers);
         matched = true;
         break;
       }
@@ -1384,6 +1390,7 @@ export function runTriage(input: {
 
   // Step 3: Profile Modifiers (e.g. blood thinners with head injury)
   if (ailmentCode) {
+    console.log(`[Triage Engine] Step 3: Checking Profile Modifiers. Reading DB fields (dob: ${person.dob}, pregnancy: ${person.pregnancy}, conditions: ${person.conditions?.join(',') || 'none'})`);
     const modifierResult = applyProfileModifiers(severity, person, ailmentCode);
     if (modifierResult.severity !== severity) {
       severity = modifierResult.severity;
@@ -1404,8 +1411,10 @@ export function runTriage(input: {
 
   // Step 5: Adaptive Ailment Tree Evaluation (if not already RED)
   if (severity !== 'RED' && ailmentCode) {
+    console.log(`[Triage Engine] Step 5: Entering evaluateAilmentTree() for ailment: ${ailmentCode}`);
     const treeResult = evaluateAilmentTree(ailmentCode, answers, person, language);
     if (treeResult.severity) {
+      console.log(`[Triage Engine] evaluateAilmentTree() returned severity: ${treeResult.severity}, ruleId: ${treeResult.ruleId}`);
       severity = escalateTo(severity, treeResult.severity);
       reasons.push(...treeResult.reasons);
       if (treeResult.ruleId) triggeredRules.push(treeResult.ruleId);
@@ -1564,6 +1573,8 @@ function evaluateAilmentTree(
     }
 
     case 'breathing_difficulty': {
+      console.log(`[Triage Engine] evaluateAilmentTree -> Hit 'breathing_difficulty' case block.`);
+      console.log(`[Triage Engine] evaluateAilmentTree -> Decision: Immediate escalation to RED (ruleId: BREATH-RED) because acute breathing difficulty is considered a critical airway emergency.`);
       return { severity: 'RED', reasons: ['Acute breathing difficulty is a critical airway/breathing emergency — call 995'], ruleId: 'BREATH-RED' };
     }
 
