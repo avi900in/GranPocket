@@ -591,31 +591,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </form>
           )}
 
-          {/* Setup New Family Household Action */}
-          {onOpenCreateHousehold && (
-            <div className="pt-2 border-t border-[#DDE5E9] dark:border-[#1E2D37]">
-              <button
-                type="button"
-                onClick={() => onOpenCreateHousehold(`${selectedCountry.dialCode} ${phone}`)}
-                className="w-full py-3 px-4 rounded-2xl border-2 border-dashed border-teal-300 dark:border-teal-700/60 bg-teal-50/50 dark:bg-teal-950/20 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-teal-800 dark:text-teal-300 transition-all flex items-center justify-between text-left group min-h-[48px]"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <Home size={16} />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold leading-tight">
-                      {language === 'zh' ? '🏡 创建新家庭档案' : '🏡 Setup New Family Household'}
-                    </div>
-                    <div className="text-[11px] text-[#52616B] dark:text-[#94A3B8] leading-tight">
-                      {language === 'zh' ? '录入新住址、照料人与全新健康数据' : 'Custom Singapore address, caregiver & clinical data'}
-                    </div>
-                  </div>
-                </div>
-                <ArrowRight size={16} className="text-teal-600 dark:text-teal-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
-              </button>
-            </div>
-          )}
+
         </div>
       </main>
 
