@@ -44,8 +44,11 @@ async function invokeLlmAgent<T>(
 ): Promise<{ result: T; source: 'llm_dynamic' | 'dynamic_reasoning_engine'; rawLlmText?: string }> {
   try {
     // Check if Tencent SDK or custom LLM API is available
-    const apiKey = process.env.CODEBUDDY_API_KEY || process.env.OPENAI_API_KEY;
-    const baseUrl = process.env.CODEBUDDY_BASE_URL || 'https://api.openai.com/v1';
+    const apiKey = process.env.GROQ_API_KEY || process.env.CODEBUDDY_API_KEY || process.env.OPENAI_API_KEY;
+    const baseUrl = process.env.GROQ_API_KEY 
+      ? 'https://api.groq.com/openai/v1' 
+      : (process.env.CODEBUDDY_BASE_URL || 'https://api.openai.com/v1');
+    const defaultModel = process.env.GROQ_API_KEY ? 'llama3-70b-8192' : 'claude-sonnet-4';
 
     if (apiKey) {
       const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -55,7 +58,7 @@ async function invokeLlmAgent<T>(
           'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: process.env.DEFAULT_LLM_MODEL || 'claude-sonnet-4',
+          model: process.env.DEFAULT_LLM_MODEL || defaultModel,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
