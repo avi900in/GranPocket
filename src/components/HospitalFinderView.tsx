@@ -146,64 +146,51 @@ export const HospitalFinderView: React.FC<HospitalFinderViewProps> = ({
     e.preventDefault();
     if (!postalInput.trim()) return;
 
-    // Try Singapore Government OneMap official API for precise 6-digit postal code coordinates
-    const cleanDigits = postalInput.trim().replace(/[^0-9]/g, '');
-    if (cleanDigits.length === 6) {
-      try {
-        setIsLocating(true);
-        const resp = await fetch(
-          `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${cleanDigits}&returnGeom=Y&getAddrDetails=Y`
-        );
-        if (resp.ok) {
-          const json = await resp.json();
-          if (json.results && json.results.length > 0) {
-            const first = json.results[0];
-            const lat = parseFloat(first.LATITUDE);
-            const lng = parseFloat(first.LONGITUDE);
-            if (!isNaN(lat) && !isNaN(lng)) {
-              setActiveLat(lat);
-              setActiveLng(lng);
-              setResolvedAddress(first.ADDRESS || first.BUILDING || `Singapore ${cleanDigits}`);
-              setLocationSource('search');
-              setLocationError(null);
-              if (mapInstanceRef.current) {
-                mapInstanceRef.current.setView([lat, lng], 14, { animate: true });
-              }
-              setIsLocating(false);
-              return;
+    const query = postalInput.trim();
+    if (!query) return;
+
+    setIsLocating(true);
+    setLocationError(null);
+
+    // 1. Try Singapore Government OneMap official API (works for postal codes, road names like 'Meyer Road', building names)
+    try {
+      const resp = await fetch(
+        `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${encodeURIComponent(query)}&returnGeom=Y&getAddrDetails=Y`
+      );
+      if (resp.ok) {
+        const json = await resp.json();
+        if (json.results && json.results.length > 0) {
+          const first = json.results[0];
+          const lat = parseFloat(first.LATITUDE);
+          const lng = parseFloat(first.LONGITUDE);
+          if (!isNaN(lat) && !isNaN(lng) && lat > 1.15 && lat < 1.48 && lng > 103.55 && lng < 104.08) {
+            setActiveLat(lat);
+            setActiveLng(lng);
+            const displayAddr = first.ADDRESS && first.ADDRESS !== 'NIL' 
+              ? first.ADDRESS 
+              : (first.ROAD_NAME && first.ROAD_NAME !== 'NIL' ? `${first.ROAD_NAME}, Singapore` : (first.BUILDING || query));
+            setResolvedAddress(displayAddr);
+            setLocationSource('search');
+            if (first.POSTAL && first.POSTAL !== 'NIL') {
+              setPostalInput(first.POSTAL);
             }
+            if (mapInstanceRef.current) {
+              mapInstanceRef.current.setView([lat, lng], 14, { animate: true });
+            }
+            setIsLocating(false);
+            return;
           }
         }
-      } catch {
-        // Fall through to local
-      } finally {
-        setIsLocating(false);
       }
+    } catch {
+      // Fall through to Nominatim
     }
 
-    // Try fast offline Singapore postal code lookup
-    const localResult = lookupSingaporePostalCode(postalInput);
-    if (localResult) {
-      setActiveLat(localResult.lat);
-      setActiveLng(localResult.lng);
-      setResolvedAddress(localResult.address);
-      setLocationSource('search');
-      setLocationError(null);
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.setView([localResult.lat, localResult.lng], 14, { animate: true });
-      }
-      return;
-    }
-
-    // Try real Nominatim search API restricted to Singapore
+    // 2. Try OpenStreetMap Nominatim API (supports international & local road names, intersections)
     try {
-      setIsLocating(true);
-      const query = postalInput.trim().toLowerCase().includes('singapore') 
-        ? postalInput.trim() 
-        : `${postalInput.trim()}, Singapore`;
-
+      const osmQuery = query.toLowerCase().includes('singapore') ? query : `${query}, Singapore`;
       const resp = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=sg&limit=1&addressdetails=1`,
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(osmQuery)}&countrycodes=sg&limit=1&addressdetails=1`,
         { headers: { 'Accept-Language': 'en' } }
       );
 
@@ -213,23 +200,39 @@ export const HospitalFinderView: React.FC<HospitalFinderViewProps> = ({
           const item = results[0];
           const lat = parseFloat(item.lat);
           const lng = parseFloat(item.lon);
-          setActiveLat(lat);
-          setActiveLng(lng);
-          setResolvedAddress(item.display_name.split(',').slice(0, 3).join(', '));
-          setLocationSource('search');
-          setLocationError(null);
-          if (mapInstanceRef.current) {
-            mapInstanceRef.current.setView([lat, lng], 14, { animate: true });
+          if (!isNaN(lat) && !isNaN(lng)) {
+            setActiveLat(lat);
+            setActiveLng(lng);
+            setResolvedAddress(item.display_name.split(',').slice(0, 3).join(', '));
+            setLocationSource('search');
+            if (mapInstanceRef.current) {
+              mapInstanceRef.current.setView([lat, lng], 14, { animate: true });
+            }
+            setIsLocating(false);
+            return;
           }
-        } else {
-          setLocationError(language === 'zh' ? '未找到该地址或邮编，请核对后重试' : 'Location or postal code not found. Please verify.');
         }
       }
     } catch {
-      setLocationError(language === 'zh' ? '搜索网络异常，请重试' : 'Search request failed. Please try again.');
-    } finally {
-      setIsLocating(false);
+      // Fall through to local postal sectors
     }
+
+    // 3. Fallback to offline Singapore postal code sector lookup
+    const localResult = lookupSingaporePostalCode(query);
+    if (localResult) {
+      setActiveLat(localResult.lat);
+      setActiveLng(localResult.lng);
+      setResolvedAddress(localResult.address);
+      setLocationSource('search');
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.setView([localResult.lat, localResult.lng], 14, { animate: true });
+      }
+      setIsLocating(false);
+      return;
+    }
+
+    setLocationError(language === 'zh' ? '未找到该地址或地名，请核对后重试' : 'Location or road not found. Please try another address.');
+    setIsLocating(false);
   };
 
   // Compute live distance and ETA to each facility

@@ -83,6 +83,10 @@ export function lookupSingaporePostalCode(postalCode: string): {
   lng: number;
 } | null {
   const clean = postalCode.trim();
+  // If not starting with digits, it's a road or building name, not a postal code
+  if (!/^\d{2,6}/.test(clean)) {
+    return null;
+  }
   if (clean.startsWith('31')) {
     return {
       address: `Block ${clean.slice(2, 5) || '123'} Toa Payoh, Singapore ${clean}`,
@@ -132,10 +136,13 @@ export function lookupSingaporePostalCode(postalCode: string): {
       lng: 103.7417,
     };
   }
-  // Generic Singapore Central fallback
-  return {
-    address: `Singapore Postal Sector ${clean}`,
-    lat: 1.3325,
-    lng: 103.8475,
-  };
+  if (clean.startsWith('43') || clean.startsWith('44')) {
+    return {
+      address: `Meyer Road / Mountbatten / Marine Parade, Singapore ${clean}`,
+      lat: 1.2992,
+      lng: 103.8970,
+    };
+  }
+  // Return null if not a recognized offline sector so real online geocoders (OneMap / Nominatim) take over
+  return null;
 }
