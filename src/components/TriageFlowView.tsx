@@ -95,6 +95,27 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
     setTextInput('Red, irritated eye since this morning, tearing and mild itch');
   };
 
+  // NLP matcher to avoid falling back to Fever all the time
+  const detectAilmentFromText = (text: string, current: Ailment | null): Ailment => {
+    const lower = text.toLowerCase();
+    
+    for (const a of AILMENTS) {
+      if (lower.includes(a.code.replace('_', ' '))) return a;
+      if (lower.includes(a.name.toLowerCase())) return a;
+    }
+    
+    if (lower.includes('breath') || lower.includes('breathing')) return AILMENTS.find(a => a.code === 'breathing_difficulty') || AILMENTS[0];
+    if (lower.includes('stomach') || lower.includes('tummy') || lower.includes('belly')) return AILMENTS.find(a => a.code === 'abdominal_pain') || AILMENTS[0];
+    if (lower.includes('throw up') || lower.includes('puke')) return AILMENTS.find(a => a.code === 'vomiting') || AILMENTS[0];
+    if (lower.includes('poop') || lower.includes('runny')) return AILMENTS.find(a => a.code === 'diarrhea') || AILMENTS[0];
+    if (lower.includes('cut') || lower.includes('bleed') || lower.includes('fall') || lower.includes('hurt')) return AILMENTS.find(a => a.code === 'injury_wound') || AILMENTS[0];
+    if (lower.includes('pee') || lower.includes('urine')) return AILMENTS.find(a => a.code === 'uti') || AILMENTS[0];
+    if (lower.includes('burn') || lower.includes('scald')) return AILMENTS.find(a => a.code === 'minor_burn') || AILMENTS[0];
+    if (lower.includes('eye') || lower.includes('vision')) return AILMENTS.find(a => a.code === 'eye_symptoms') || AILMENTS[0];
+
+    return current || AILMENTS[0]; // fallback to fever
+  };
+
   // Start question tree for an ailment
   const startAssessment = (ailment: Ailment, initialAnswers: Record<string, any> = {}) => {
     setSelectedAilment(ailment);
@@ -552,7 +573,7 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
 
                   <button
                     onClick={() => {
-                      const detected = AILMENTS.find(a => textInput.toLowerCase().includes(a.code.replace('_', ' '))) || selectedAilment || AILMENTS[0];
+                      const detected = detectAilmentFromText(textInput, selectedAilment);
                       startAssessment(detected);
                     }}
                     disabled={!textInput.trim() && !photoUrl}
@@ -606,7 +627,7 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
                   <div className="flex justify-end pt-1">
                     <button
                       onClick={() => {
-                        const detected = AILMENTS.find(a => textInput.toLowerCase().includes(a.code.replace('_', ' '))) || selectedAilment || AILMENTS[0];
+                        const detected = detectAilmentFromText(textInput, selectedAilment);
                         startAssessment(detected);
                       }}
                       className="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center space-x-1.5"
