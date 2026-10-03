@@ -272,6 +272,7 @@ export default function App() {
   const [caregiverAlerts, setCaregiverAlerts] = useState<CaregiverAlertEntry[]>([]);
   const [activeAlertToast, setActiveAlertToast] = useState<CaregiverAlertEntry | null>(null);
   const [isSchedulerModalOpen, setIsSchedulerModalOpen] = useState<boolean>(false);
+  const [createHouseholdInitialPhone, setCreateHouseholdInitialPhone] = useState<string>('');
   const [dismissedAlertIds, setDismissedAlertIds] = useState<Set<string>>(new Set());
   const hasAutoDispatchedRef = useRef<Set<string>>(new Set());
 
@@ -984,18 +985,22 @@ export default function App() {
       createdAt: new Date().toISOString(),
     };
 
+    const isFather = /father|dad|husband|brother|uncle/i.test(data.caregiverRelationship);
+    const isHelper = /helper|maid/i.test(data.caregiverRelationship);
+    const avatar = isFather ? '👨' : (isHelper ? '🧕' : '👩');
+
     const caregiverPerson: Person = {
       id: `person-cg-${Date.now()}`,
       householdId: newHouseholdId,
       name: data.caregiverName,
       dob: '1988-05-12',
-      sex: 'female',
+      sex: isFather ? 'male' : 'female',
       relationshipLabel: data.caregiverRelationship,
       language: language,
       hasLogin: true,
       phone: data.caregiverPhone,
-      systemRole: 'CAREGIVER',
-      avatar: '🧕',
+      systemRole: 'ADMIN',
+      avatar: avatar,
       medicalProfile: {
         bloodType: 'O+',
         conditions: [],
@@ -1012,8 +1017,9 @@ export default function App() {
 
     if (data.seedSampleData) {
       const cleanSurname = data.name.replace(/^(The\s+)|(\s+(Family|Household))$/gi, '').trim() || 'Family';
+      const childId = `person-child-${Date.now()}`;
       const childPerson: Person = {
-        id: `person-child-${Date.now()}`,
+        id: childId,
         householdId: newHouseholdId,
         name: `Chloe ${cleanSurname}`,
         dob: '2023-04-10', // ~3.5 years old
@@ -1023,7 +1029,9 @@ export default function App() {
         hasLogin: false,
         systemRole: 'DEPENDENT',
         avatar: '👧🏻',
-        activeComplaint: 'Fever 38.6°C, runny nose, slight dry cough for 1 day',
+        careLinks: [
+          { caregiverPersonId: caregiverPerson.id, recipientPersonId: childId, type: 'primary_caregiver' },
+        ],
         medicalProfile: {
           bloodType: 'A+',
           weight: 14.5,
@@ -1035,7 +1043,7 @@ export default function App() {
           ],
           intolerances: [],
           medications: [
-            { id: `m-vent-${Date.now()}`, name: 'Salbutamol Inhaler (Ventolin)', dose: '100mcg', frequency: 'PRN for wheezing' },
+            { id: `m-vent-${Date.now()}`, name: 'Salbutamol Inhaler (Ventolin)', dose: '100mcg', frequency: 'PRN for wheezing', minIntervalHours: 4 },
           ],
           vaccinations: [],
           lastReviewedDate: new Date().toISOString().slice(0, 10),
@@ -1048,8 +1056,9 @@ export default function App() {
         },
       };
 
+      const grandmaId = `person-gm-${Date.now()}`;
       const grandmaPerson: Person = {
-        id: `person-gm-${Date.now()}`,
+        id: grandmaId,
         householdId: newHouseholdId,
         name: `Ah Ma ${cleanSurname}`,
         dob: '1952-11-20', // ~73 years old
@@ -1058,8 +1067,10 @@ export default function App() {
         language: language,
         hasLogin: false,
         systemRole: 'DEPENDENT',
-        avatar: '👴',
-        activeComplaint: 'Mild knee stiffness, taking daily blood pressure medication',
+        avatar: '👵',
+        careLinks: [
+          { caregiverPersonId: caregiverPerson.id, recipientPersonId: grandmaId, type: 'primary_caregiver' },
+        ],
         medicalProfile: {
           bloodType: 'B+',
           weight: 58.0,
@@ -1072,8 +1083,8 @@ export default function App() {
           ],
           intolerances: [],
           medications: [
-            { id: `m-amlod-${Date.now()}`, name: 'Amlodipine Besylate', dose: '5mg', frequency: 'Once daily morning' },
-            { id: `m-metf-${Date.now()}`, name: 'Metformin XR', dose: '500mg', frequency: 'Twice daily with meals' },
+            { id: `m-amlod-${Date.now()}`, name: 'Amlodipine Besylate', dose: '5mg', frequency: 'Once daily morning', minIntervalHours: 24 },
+            { id: `m-metf-${Date.now()}`, name: 'Metformin XR', dose: '500mg', frequency: 'Twice daily with meals', minIntervalHours: 12 },
           ],
           vaccinations: [],
           lastReviewedDate: new Date().toISOString().slice(0, 10),
@@ -1089,16 +1100,26 @@ export default function App() {
       newMembersList.push(childPerson, grandmaPerson);
       defaultSelectedPerson = childPerson;
 
-      const pastTime = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const recentTime = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       newMedLogs.push({
-        id: `log-seed-${Date.now()}`,
+        id: `log-seed-1-${Date.now()}`,
         subjectId: childPerson.id,
         subjectName: childPerson.name,
         givenBy: `${caregiverPerson.name} (${caregiverPerson.relationshipLabel})`,
-        medicine: 'Paracetamol Suspension (120mg/5ml)',
-        dose: '6ml (144mg)',
-        givenAt: pastTime,
-        notes: 'Fever 38.6°C',
+        medicine: 'Salbutamol Inhaler (Ventolin)',
+        dose: '100mcg',
+        givenAt: recentTime,
+        notes: 'Routine maintenance puff given',
+      });
+      newMedLogs.push({
+        id: `log-seed-2-${Date.now()}`,
+        subjectId: grandmaPerson.id,
+        subjectName: grandmaPerson.name,
+        givenBy: `${caregiverPerson.name} (${caregiverPerson.relationshipLabel})`,
+        medicine: 'Amlodipine Besylate',
+        dose: '5mg',
+        givenAt: recentTime,
+        notes: 'Morning blood pressure dose',
       });
     }
 
@@ -1130,6 +1151,13 @@ export default function App() {
     setIsLoggedIn(true);
     setTriageStep('select_patient');
     setActiveTab('family');
+
+    try {
+      localStorage.setItem('granpocket_is_logged_in', 'true');
+      localStorage.setItem('granpocket_current_user', JSON.stringify(caregiverPerson));
+      localStorage.setItem('granpocket_active_tab', 'family');
+      localStorage.setItem('granpocket_active_household_id', newHouseholdId);
+    } catch {}
 
     const newAudit: AuditEvent = {
       id: `audit-hh-${Date.now()}`,
@@ -1210,21 +1238,50 @@ export default function App() {
       const dependent = houseMembers.find(m => m.systemRole === 'DEPENDENT') || houseMembers[0] || user;
       setSelectedPerson(dependent);
       setTriageStep('select_patient');
-      const defaultScreen = userScreens.includes('triage') ? 'triage' : (userScreens[0] || 'facilities');
+      const defaultScreen = userScreens.includes('family') ? 'family' : (userScreens[0] || 'facilities');
       setActiveTab(defaultScreen);
       if (user.language) setLanguage(user.language);
     } else {
-      setHousehold(INITIAL_HOUSEHOLD);
-      const lucas = members.find(m => m.id === 'person-lucas') || members[0];
-      setSelectedPerson(lucas);
-      setTriageStep('select_patient');
-      const defaultScreen = userScreens.includes('triage') ? 'triage' : (userScreens[0] || 'facilities');
-      setActiveTab(defaultScreen);
-      if (user.id === 'person-siti') {
-        setLanguage('ms');
-      } else if (user.language) {
-        setLanguage(user.language);
+      // Custom household or fallback
+      const customHh = allHouseholds.find(h => h.id === user.householdId);
+      if (customHh) {
+        setHousehold(customHh);
+        setSelectedPerson(user);
+      } else {
+        const fallbackHousehold: Household = {
+          id: user.householdId || `hh-custom-${Date.now()}`,
+          name: `${user.name}'s Family Household`,
+          defaultRegion: 'Central',
+          addresses: [
+            {
+              id: `addr-${Date.now()}`,
+              householdId: user.householdId || `hh-custom-${Date.now()}`,
+              label: 'Home',
+              text: 'Singapore',
+              postalCode: '310123',
+              lat: 1.3521,
+              lng: 103.8198,
+              isPrimary: true,
+            },
+          ],
+          emergencyContacts: [
+            {
+              id: `ec-${Date.now()}`,
+              householdId: user.householdId || `hh-custom-${Date.now()}`,
+              name: user.name,
+              relationship: user.relationshipLabel || 'Admin',
+              phone: user.phone || '+65 9123-4567',
+              priority: 1,
+            },
+          ],
+          createdAt: new Date().toISOString(),
+        };
+        setAllHouseholds(prev => [...prev, fallbackHousehold]);
+        setHousehold(fallbackHousehold);
+        setSelectedPerson(user);
       }
+      setActiveTab('family');
+      if (user.language) setLanguage(user.language);
     }
   };
 
@@ -1255,7 +1312,10 @@ export default function App() {
           onSelectLanguage={(lang) => setLanguage(lang)}
           isDarkMode={isDarkMode}
           onToggleDarkMode={toggleDarkMode}
-          onOpenCreateHousehold={() => setIsCreateHouseholdOpen(true)}
+          onOpenCreateHousehold={(phone?: string) => {
+            if (phone) setCreateHouseholdInitialPhone(phone);
+            setIsCreateHouseholdOpen(true);
+          }}
           allHouseholds={allHouseholds}
         />
 
@@ -1275,6 +1335,7 @@ export default function App() {
           onClose={() => setIsCreateHouseholdOpen(false)}
           onCreateHousehold={handleCreateHousehold}
           language={language}
+          initialPhone={createHouseholdInitialPhone}
         />
       </div>
     );

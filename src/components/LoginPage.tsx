@@ -48,7 +48,7 @@ interface LoginPageProps {
   onSelectLanguage: (lang: Language) => void;
   isDarkMode?: boolean;
   onToggleDarkMode?: () => void;
-  onOpenCreateHousehold?: () => void;
+  onOpenCreateHousehold?: (phone?: string) => void;
   allHouseholds?: Household[];
 }
 
@@ -73,8 +73,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const countryDropdownRef = useRef<HTMLDivElement>(null);
 
   const [phone, setPhone] = useState('92345678');
-  const [signUpName, setSignUpName] = useState('');
-  const [signUpRole, setSignUpRole] = useState('Mother / Primary Caregiver');
 
   // Step: phone vs otp
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
@@ -108,14 +106,35 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
   const handleSendOtp = (e: React.FormEvent) => {
     e.preventDefault();
-    if (authMode === 'signup' && !signUpName.trim()) {
-      setLoginError('Please enter your full name to create an account');
+    const cleanDigits = phone.replace(/[^0-9]/g, '');
+    if (cleanDigits.length < 7) {
+      setLoginError(language === 'zh' ? '请输入有效的手机号码（至少7位）' : 'Please enter a valid phone number (at least 7 digits)');
       return;
     }
-    if (phone.length < 7) {
-      setLoginError('Please enter a valid phone number');
+
+    if (authMode === 'signup') {
+      if (onOpenCreateHousehold) {
+        onOpenCreateHousehold(`${selectedCountry.dialCode} ${phone}`);
+        return;
+      }
+    }
+
+    // Match member by phone
+    const matched = members.find(m => {
+      if (!m.phone) return false;
+      const mClean = m.phone.replace(/[^0-9]/g, '');
+      return mClean.endsWith(cleanDigits.slice(-8)) || cleanDigits.endsWith(mClean.slice(-8));
+    });
+
+    if (!matched) {
+      setLoginError(
+        language === 'zh'
+          ? `未找到该手机号码 (${selectedCountry.dialCode} ${phone}) 的家庭账号。请点击下方“创建新家庭档案”建立您的家庭。`
+          : `No account found for phone number (${selectedCountry.dialCode} ${phone}). Please set up a new family household.`
+      );
       return;
     }
+
     setLoginError(null);
     setStep('otp');
   };
@@ -123,44 +142,27 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const handleVerifyOtp = (e: React.FormEvent) => {
     e.preventDefault();
     if (!consentChecked) {
-      setLoginError('Please acknowledge the PDPA consent statement to proceed.');
+      setLoginError(language === 'zh' ? '请勾选隐私同意声明以继续。' : 'Please acknowledge the PDPA consent statement to proceed.');
       return;
     }
 
-    if (authMode === 'signup') {
-      // Create new registered Person profile
-      const newPerson: Person = {
-        id: `person-${Date.now()}`,
-        householdId: 'household-tan',
-        name: signUpName.trim() || 'Caregiver User',
-        dob: '1990-01-01',
-        sex: 'female',
-        relationshipLabel: signUpRole.trim() || 'Caregiver',
-        language: language,
-        hasLogin: true,
-        phone: `${selectedCountry.dialCode} ${phone}`,
-        systemRole: 'CAREGIVER',
-        avatar: '🧕',
-        medicalProfile: {
-          conditions: [],
-          allergies: [],
-          intolerances: [],
-          medications: [],
-          vaccinations: [],
-        },
-      };
+    // Match member by phone
+    const cleanDigits = phone.replace(/[^0-9]/g, '');
+    const matched = members.find(m => {
+      if (!m.phone) return false;
+      const mClean = m.phone.replace(/[^0-9]/g, '');
+      return mClean.endsWith(cleanDigits.slice(-8)) || cleanDigits.endsWith(mClean.slice(-8));
+    });
 
-      if (onRegisterUser) {
-        onRegisterUser(newPerson);
-      }
-      onLoginSuccess(newPerson);
+    if (!matched) {
+      setLoginError(
+        language === 'zh'
+          ? '未找到该号码关联的账号，请设置全新家庭档案。'
+          : 'No account found for this phone number. Please set up a new family household.'
+      );
+      setStep('phone');
       return;
     }
-
-    // Match member by phone or default to Sarah Tan
-    const matched = members.find(m => m.phone?.replace(/[^0-9]/g, '').includes(phone.slice(-8))) ||
-      members.find(m => m.systemRole === 'CAREGIVER') ||
-      members[0];
 
     onLoginSuccess(matched);
   };
@@ -399,17 +401,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setAuthMode('signup');
-                  setLoginError(null);
+                  if (onOpenCreateHousehold) {
+                    onOpenCreateHousehold(`${selectedCountry.dialCode} ${phone}`);
+                  }
                 }}
-                className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-1.5 min-h-[44px] ${
-                  authMode === 'signup'
-                    ? 'bg-white dark:bg-[#0F1A20] text-[#0F766E] dark:text-[#2DD4BF] shadow-xs'
-                    : 'text-[#52616B] dark:text-[#94A3B8] hover:text-[#14212B] dark:hover:text-white'
-                }`}
+                className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-1.5 min-h-[44px] text-[#52616B] dark:text-[#94A3B8] hover:text-[#14212B] dark:hover:text-white hover:bg-white/50"
               >
-                <UserPlus size={16} />
-                <span>{language === 'zh' ? '新用户注册' : 'Sign Up'}</span>
+                <Home size={16} className="text-[#0F766E] dark:text-[#2DD4BF]" />
+                <span>{language === 'zh' ? '创建新家庭' : 'Setup Household'}</span>
               </button>
             </div>
           )}
@@ -417,45 +416,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           {/* Phone / OTP Form */}
           {step === 'phone' ? (
             <form onSubmit={handleSendOtp} className="space-y-4">
-              {/* Sign Up Specific Fields */}
-              {authMode === 'signup' && (
-                <div className="space-y-3.5 animate-fadeIn">
-                  <div>
-                    <label className="text-sm font-bold text-[#14212B] dark:text-[#F1F5F9] block mb-1.5">
-                      {language === 'zh' ? '您的姓名 / 称呼' : 'Your Full Name'}
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        required
-                        value={signUpName}
-                        onChange={e => setSignUpName(e.target.value)}
-                        placeholder="e.g. Rachel Lim"
-                        className="w-full p-3.5 pl-10 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] bg-white dark:bg-[#16232B] font-medium text-base focus:border-[#0F766E] focus:ring-2 focus:ring-[#0F766E]/20 text-[#14212B] dark:text-[#F1F5F9] min-h-[48px]"
-                      />
-                      <User size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#52616B] dark:text-[#94A3B8]" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-bold text-[#14212B] dark:text-[#F1F5F9] block mb-1.5">
-                      {language === 'zh' ? '家庭中的角色 / 身份' : 'Role in Household'}
-                    </label>
-                    <select
-                      value={signUpRole}
-                      onChange={e => setSignUpRole(e.target.value)}
-                      className="w-full p-3.5 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] bg-white dark:bg-[#16232B] font-medium text-sm focus:border-[#0F766E] text-[#14212B] dark:text-[#F1F5F9] min-h-[48px]"
-                    >
-                      <option value="Mother / Primary Caregiver">Mother / Primary Caregiver</option>
-                      <option value="Father / Household Admin">Father / Household Admin</option>
-                      <option value="Grandparent">Grandparent</option>
-                      <option value="Domestic Helper / Caregiver">Domestic Helper / Caregiver</option>
-                      <option value="Family Relative">Family Relative</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-
               {/* Mobile Number with Country Selection Dropdown */}
               <div>
                 <label className="text-sm font-bold text-[#14212B] dark:text-[#F1F5F9] block mb-1.5">
@@ -513,7 +473,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     type="tel"
                     required
                     value={phone}
-                    onChange={e => setPhone(e.target.value)}
+                    onChange={e => {
+                      setPhone(e.target.value);
+                      if (loginError) setLoginError(null);
+                    }}
                     placeholder={selectedCountry.code === 'SG' ? '9123 4567' : 'Enter mobile number'}
                     className="flex-1 p-3.5 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] bg-white dark:bg-[#16232B] font-mono font-bold text-base focus:border-[#0F766E] focus:ring-2 focus:ring-[#0F766E]/20 text-[#14212B] dark:text-[#F1F5F9] min-h-[48px]"
                   />
@@ -521,8 +484,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
 
               {loginError && (
-                <div className="text-sm text-[#C62828] dark:text-red-400 font-semibold p-2.5 bg-[#FDECEA] dark:bg-red-950/40 rounded-xl">
-                  {loginError}
+                <div className="space-y-2">
+                  <div className="text-sm text-[#C62828] dark:text-red-400 font-semibold p-3 bg-[#FDECEA] dark:bg-red-950/40 rounded-xl leading-relaxed">
+                    {loginError}
+                  </div>
+                  {onOpenCreateHousehold && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenCreateHousehold(`${selectedCountry.dialCode} ${phone}`)}
+                      className="w-full py-2.5 px-3.5 bg-[#0F766E] hover:bg-[#0B5C56] text-white text-xs sm:text-sm font-bold rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all active:scale-98"
+                    >
+                      <Home size={15} />
+                      <span>{language === 'zh' ? '🏡 点击设置全新家庭档案' : '🏡 Setup New Family Household with this Number'}</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -530,41 +505,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 type="submit"
                 className="w-full py-3.5 px-6 bg-[#0F766E] hover:bg-[#0B5C56] text-white font-bold text-base rounded-full shadow-md active:scale-98 transition-all flex items-center justify-center gap-2 min-h-[48px]"
               >
-                <span>{authMode === 'signup' ? 'Create Account & Send OTP' : 'Send 6-Digit OTP'}</span>
+                <span>{language === 'zh' ? '发送 6 位验证码' : 'Send 6-Digit OTP'}</span>
                 <ArrowRight size={18} />
               </button>
 
               {/* Toggle Between Sign In & Sign Up Link */}
               <div className="text-center pt-2 border-t border-[#DDE5E9]/70 dark:border-[#1E2D37]">
-                {authMode === 'signin' ? (
-                  <p className="text-xs text-[#52616B] dark:text-[#94A3B8]">
-                    New to GranPocket?{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMode('signup');
-                        setLoginError(null);
-                      }}
-                      className="font-bold text-[#0F766E] dark:text-[#2DD4BF] hover:underline"
-                    >
-                      Sign up as a new user →
-                    </button>
-                  </p>
-                ) : (
-                  <p className="text-xs text-[#52616B] dark:text-[#94A3B8]">
-                    Already have an account?{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMode('signin');
-                        setLoginError(null);
-                      }}
-                      className="font-bold text-[#0F766E] dark:text-[#2DD4BF] hover:underline"
-                    >
-                      Sign in with mobile number →
-                    </button>
-                  </p>
-                )}
+                <p className="text-xs text-[#52616B] dark:text-[#94A3B8]">
+                  New to GranPocket?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onOpenCreateHousehold) {
+                        onOpenCreateHousehold(`${selectedCountry.dialCode} ${phone}`);
+                      }
+                    }}
+                    className="font-bold text-[#0F766E] dark:text-[#2DD4BF] hover:underline"
+                  >
+                    Setup a new family household →
+                  </button>
+                </p>
               </div>
             </form>
           ) : (
@@ -625,7 +585,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   className="flex-1 py-3.5 bg-[#0F766E] hover:bg-[#0B5C56] text-white font-bold text-base rounded-full shadow-md active:scale-98 transition-all flex items-center justify-center gap-2 min-h-[48px]"
                 >
                   <ShieldCheck size={18} />
-                  <span>{authMode === 'signup' ? 'Complete Sign Up' : 'Verify & Enter'}</span>
+                  <span>{language === 'zh' ? '验证并进入' : 'Verify & Enter'}</span>
                 </button>
               </div>
             </form>
@@ -636,7 +596,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             <div className="pt-2 border-t border-[#DDE5E9] dark:border-[#1E2D37]">
               <button
                 type="button"
-                onClick={onOpenCreateHousehold}
+                onClick={() => onOpenCreateHousehold(`${selectedCountry.dialCode} ${phone}`)}
                 className="w-full py-3 px-4 rounded-2xl border-2 border-dashed border-teal-300 dark:border-teal-700/60 bg-teal-50/50 dark:bg-teal-950/20 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-teal-800 dark:text-teal-300 transition-all flex items-center justify-between text-left group min-h-[48px]"
               >
                 <div className="flex items-center gap-2.5">

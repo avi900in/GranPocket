@@ -94,10 +94,10 @@ export function resolveCaregiverForPatient(
   }
 
   return {
-    id: 'cg-default',
-    name: 'Sarah Tan',
-    role: 'Mother / Primary Caregiver',
-    phone: '+65 9234-5678',
+    id: currentCaregiver?.id || 'cg-default',
+    name: currentCaregiver?.name || 'Primary Caregiver',
+    role: currentCaregiver?.relationshipLabel || 'Caregiver',
+    phone: currentCaregiver?.phone || '+65 9123-4567',
   };
 }
 

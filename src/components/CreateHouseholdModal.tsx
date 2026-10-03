@@ -16,6 +16,7 @@ interface CreateHouseholdModalProps {
     seedSampleData: boolean;
   }) => void;
   language: Language;
+  initialPhone?: string;
 }
 
 export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
@@ -23,15 +24,22 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
   onClose,
   onCreateHousehold,
   language,
+  initialPhone,
 }) => {
   const [name, setName] = useState('');
   const [postalCode, setPostalCode] = useState('640456');
   const [addressText, setAddressText] = useState('Block 456 Jurong West St 41, #06-123, Singapore 640456');
   const [caregiverName, setCaregiverName] = useState('');
   const [caregiverRole, setCaregiverRole] = useState('Mother / Primary Caregiver');
-  const [caregiverPhone, setCaregiverPhone] = useState('9876-5432');
+  const [caregiverPhone, setCaregiverPhone] = useState(initialPhone || '9876-5432');
   const [seedSampleData, setSeedSampleData] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen && initialPhone) {
+      setCaregiverPhone(initialPhone);
+    }
+  }, [isOpen, initialPhone]);
 
   if (!isOpen) return null;
 
