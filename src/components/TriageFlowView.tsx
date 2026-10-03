@@ -143,24 +143,23 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
       return;
     }
 
-    if (triageMode === 'agentic') {
-      runAgenticTriage(textInput, initialAnswers, person, language).then(finalResult => {
-        onTriageComplete(finalResult, initialAnswers, ailment);
-      });
-      return;
-    }
-
     const tree = getQuestionTree(ailment.code, person);
     if (tree.length === 0) {
-      const res = runTriage({
-        text: textInput,
-        ailmentCode: ailment.code,
-        answers: initialAnswers,
-        person,
-        language,
-        imageDescriptors: photoDescriptors,
-      });
-      onTriageComplete(res, initialAnswers, ailment);
+      if (triageMode === 'agentic') {
+        runAgenticTriage(textInput, initialAnswers, person, language).then(finalResult => {
+          onTriageComplete(finalResult, initialAnswers, ailment);
+        });
+      } else {
+        const res = runTriage({
+          text: textInput,
+          ailmentCode: ailment.code,
+          answers: initialAnswers,
+          person,
+          language,
+          imageDescriptors: photoDescriptors,
+        });
+        onTriageComplete(res, initialAnswers, ailment);
+      }
       return;
     }
 
