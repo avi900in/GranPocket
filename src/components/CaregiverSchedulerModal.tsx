@@ -18,6 +18,7 @@ import {
 import type { Person, CheckBackPlan, MedicationLogEntry } from '../types';
 import type { CaregiverAlertEntry } from '../services/dbService';
 import { ScheduledJob } from '../services/schedulerService';
+import { sendSms } from '../services/twilioService';
 
 interface CaregiverSchedulerModalProps {
   isOpen: boolean;
@@ -52,8 +53,14 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
 
   if (!isOpen) return null;
 
-  const handleSimulate = (job: ScheduledJob) => {
+  const handleSimulate = async (job: ScheduledJob) => {
     onTriggerSimulatedAlert(job);
+    
+    // Dispatch actual SMS via Twilio using the Caregiver Phone
+    const contactPhone = job.caregiverPhone || '+65 91234567';
+    const alertMessage = `GranPocket Scheduled Reminder for ${job.caregiverName}: ${job.title} - ${job.summary}`;
+    await sendSms(contactPhone, alertMessage);
+    
     setTestTriggerSuccess(`Simulated alert successfully dispatched to ${job.caregiverName} via SMS & In-app!`);
     setTimeout(() => setTestTriggerSuccess(null), 4000);
   };

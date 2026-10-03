@@ -24,6 +24,7 @@ import type { TriageResult, Person, Address, EmergencyContact, Language, Ailment
 import { getSeverityDisplay } from '../engine/severityDisplay';
 import { findNearestFacilities, isPanelHospital } from '../engine/singaporeData';
 import { getAgeDisplay } from '../engine/triageEngine';
+import { sendSms } from '../services/twilioService';
 
 interface TriageResultViewProps {
   result: TriageResult;
@@ -93,7 +94,17 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
     pediatricOnly: isPediatric,
   });
 
-  const handleSendFamilyAlert = () => {
+  const [isSendingSms, setIsSendingSms] = useState(false);
+
+  const handleSendFamilyAlert = async () => {
+    setIsSendingSms(true);
+    // Find a primary caregiver or use the first emergency contact
+    const contactPhone = emergencyContacts?.[0]?.phone || person.phone || '+65 91234567'; // fallback
+    const alertMessage = `GranPocket Alert: ${person.name} has completed triage with severity ${result.severity}. Please check the app.`;
+    
+    const response = await sendSms(contactPhone, alertMessage);
+    
+    setIsSendingSms(false);
     setFamilyAlertSent(true);
     setTimeout(() => setFamilyAlertSent(false), 5000);
   };
