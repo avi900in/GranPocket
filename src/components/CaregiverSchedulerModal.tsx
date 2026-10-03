@@ -25,6 +25,8 @@ interface CaregiverSchedulerModalProps {
   jobs: ScheduledJob[];
   alerts: CaregiverAlertEntry[];
   members: Person[];
+  currentUser?: Person | null;
+  totalHouseholdCount?: number;
   onTriggerSimulatedAlert: (job: ScheduledJob) => void;
   onAcknowledgeAlert: (alertId: string) => void;
   onNavigateToMedication: () => void;
@@ -37,6 +39,8 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
   jobs,
   alerts,
   members,
+  currentUser,
+  totalHouseholdCount,
   onTriggerSimulatedAlert,
   onAcknowledgeAlert,
   onNavigateToMedication,
@@ -44,6 +48,7 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
 }) => {
   const [activeTab, setActiveTab] = useState<'jobs' | 'matrix' | 'history'>('jobs');
   const [testTriggerSuccess, setTestTriggerSuccess] = useState<string | null>(null);
+  const isRestrictedByRbac = totalHouseholdCount !== undefined && members.length < totalHouseholdCount;
 
   if (!isOpen) return null;
 
@@ -81,6 +86,12 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
               <h3 id="caregiver-scheduler-title" className="text-xl sm:text-2xl font-heading font-black text-[#14212B] dark:text-[#F1F5F9] mt-0.5">
                 Caregiver Scheduler & Alert Workflow
               </h3>
+              {isRestrictedByRbac && (
+                <div className="flex items-center gap-1.5 text-xs text-blue-700 dark:text-blue-400 font-bold mt-1">
+                  <ShieldCheck size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span>RBAC Scoped: Active for {members.length} of {totalHouseholdCount} Household Members (Care Recipients Only per Section 3 & 9)</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -155,9 +166,14 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
                 </span>
               </div>
 
-              <div className="space-y-3">
-                {jobs.map(job => {
-                  const isDue = job.status === 'DUE_NOW';
+              {jobs.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 dark:bg-[#0F1A20] rounded-2xl border border-slate-200 dark:border-[#1E2D37] text-slate-500 dark:text-slate-400 text-xs">
+                  No scheduled jobs or medication alerts for your designated care recipients.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {jobs.map(job => {
+                    const isDue = job.status === 'DUE_NOW';
                   const isMed = job.type === 'MEDICINE_DUE';
                   return (
                     <div
@@ -244,6 +260,7 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
                   );
                 })}
               </div>
+              )}
             </div>
           )}
 
@@ -307,8 +324,13 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
                 <span className="font-mono font-bold text-teal-600">{alerts.length} Total Dispatched</span>
               </div>
 
-              <div className="space-y-2.5">
-                {alerts.map(a => (
+              {alerts.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 dark:bg-[#0F1A20] rounded-2xl border border-slate-200 dark:border-[#1E2D37] text-slate-500 dark:text-slate-400 text-xs">
+                  No alerts dispatched for your designated care recipients.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {alerts.map(a => (
                   <div
                     key={a.id}
                     className="p-3.5 rounded-2xl border border-slate-200 dark:border-[#1E2D37] bg-white dark:bg-[#0F1A20] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
@@ -337,6 +359,7 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
                   </div>
                 ))}
               </div>
+              )}
             </div>
           )}
 

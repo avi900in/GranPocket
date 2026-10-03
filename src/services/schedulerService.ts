@@ -37,13 +37,38 @@ export interface ScheduledJob {
 /**
  * Resolves the designated primary caregiver for a given patient
  */
-export function resolveCaregiverForPatient(patient: Person, allMembers: Person[]): {
+export function resolveCaregiverForPatient(
+  patient: Person, 
+  allMembers: Person[], 
+  currentCaregiver?: Person | null
+): {
   id: string;
   name: string;
   role: string;
   phone: string;
 } {
-  // 1. Check direct careLinks
+  // 1. If currentCaregiver is provided and has a careLink with patient (or is the patient themselves):
+  if (currentCaregiver) {
+    if (patient.id === currentCaregiver.id) {
+      return {
+        id: currentCaregiver.id,
+        name: currentCaregiver.name,
+        role: currentCaregiver.relationshipLabel || 'Self',
+        phone: currentCaregiver.phone || '+65 9234-5678',
+      };
+    }
+    const matchingLink = patient.careLinks?.find(cl => cl.caregiverPersonId === currentCaregiver.id);
+    if (matchingLink) {
+      return {
+        id: currentCaregiver.id,
+        name: currentCaregiver.name,
+        role: currentCaregiver.relationshipLabel || (matchingLink.type === 'helper' ? 'Helper / Caregiver' : 'Caregiver'),
+        phone: currentCaregiver.phone || '+65 9888-7766',
+      };
+    }
+  }
+
+  // 2. Check direct careLinks
   if (patient.careLinks && patient.careLinks.length > 0) {
     const primaryLink = patient.careLinks.find(cl => cl.type === 'primary_caregiver') || patient.careLinks[0];
     const caregiver = allMembers.find(m => m.id === primaryLink.caregiverPersonId);
@@ -57,7 +82,7 @@ export function resolveCaregiverForPatient(patient: Person, allMembers: Person[]
     }
   }
 
-  // 2. Fallback to adult admin or member in household
+  // 3. Fallback to adult admin or member in household
   const adult = allMembers.find(m => m.id !== patient.id && (m.systemRole === 'ADMIN' || m.systemRole === 'CAREGIVER' || m.systemRole === 'MEMBER'));
   if (adult) {
     return {
@@ -82,7 +107,8 @@ export function resolveCaregiverForPatient(patient: Person, allMembers: Person[]
 export function computeScheduledJobs(
   members: Person[],
   plans: CheckBackPlan[],
-  medicationLogs: MedicationLogEntry[]
+  medicationLogs: MedicationLogEntry[],
+  currentCaregiver?: Person | null
 ): ScheduledJob[] {
   const jobs: ScheduledJob[] = [];
 
@@ -90,7 +116,7 @@ export function computeScheduledJobs(
   for (const person of members) {
     const meds = person.medicalProfile?.medications || [];
     for (const med of meds) {
-      const caregiver = resolveCaregiverForPatient(person, members);
+      const caregiver = resolveCaregiverForPatient(person, members, currentCaregiver);
 
       // Find the last given log for this patient and med
       const lastLog = medicationLogs.find(
@@ -159,7 +185,7 @@ export function computeScheduledJobs(
       systemRole: 'DEPENDENT',
     } as unknown as Person;
 
-    const caregiver = resolveCaregiverForPatient(person, members);
+    const caregiver = resolveCaregiverForPatient(person, members, currentCaregiver);
     const nextCheckTime = new Date(plan.nextCheckAt).getTime();
     const isDue = Date.now() >= nextCheckTime || plan.checkIns.length === 1;
 

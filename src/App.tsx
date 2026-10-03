@@ -284,27 +284,7 @@ export default function App() {
     });
   }, []);
 
-  // Compute active scheduled jobs dynamically
-  const scheduledJobs = computeScheduledJobs(currentHouseholdMembers, monitoringPlans, medicationLogs);
-  const dueJobs = scheduledJobs.filter(j => j.status === 'DUE_NOW');
 
-  // Automated Caregiver Alert Dispatcher
-  useEffect(() => {
-    // If there is an active job due and no active toast, pick the first un-dismissed due job and trigger alert once
-    // Ensure the alert is user-centric (only pops up for the designated caregiver)
-    const firstDue = dueJobs.find(j => 
-      !dismissedAlertIds.has(j.id) && 
-      !hasAutoDispatchedRef.current.has(j.id) && 
-      j.caregiverId === currentUser?.id
-    );
-    if (firstDue && !activeAlertToast) {
-      hasAutoDispatchedRef.current.add(firstDue.id);
-      const newAlert = createCaregiverAlertFromJob(firstDue);
-      setActiveAlertToast(newAlert);
-      setCaregiverAlerts(prev => [newAlert, ...prev]);
-      saveCaregiverAlertToDb(newAlert);
-    }
-  }, [dueJobs, dismissedAlertIds, activeAlertToast, currentUser]);
 
   // Handle Remove / Resolve Ongoing Ailment for a Patient
   const handleRemoveAilment = async (personId: string) => {
@@ -630,6 +610,70 @@ export default function App() {
     const allowedIds = new Set(eligibleMedicationMembers.map(m => m.id));
     return monitoringPlans.filter(plan => allowedIds.has(plan.subjectId));
   }, [monitoringPlans, eligibleMedicationMembers]);
+
+  // Dynamically filter eligible members for scheduled alerts & jobs based on active role capabilities (Section 3 & 9: receive_alerts)
+  const eligibleAlertMembers = useMemo(() => {
+    if (!currentUser) return currentHouseholdMembers;
+    const alertScope = activeRolePerms?.capabilities?.receive_alerts || 'none';
+
+    if (alertScope === 'full') {
+      return currentHouseholdMembers;
+    }
+    if (alertScope === 'care_recipients') {
+      return currentHouseholdMembers.filter(member => {
+        // Self or designated care recipient linked via careLinks
+        if (member.id === currentUser.id) return true;
+        return member.careLinks?.some(link => link.caregiverPersonId === currentUser.id);
+      });
+    }
+    if (alertScope === 'own') {
+      return currentHouseholdMembers.filter(member => member.id === currentUser.id);
+    }
+    return [];
+  }, [currentHouseholdMembers, currentUser, activeRolePerms]);
+
+  // Compute active scheduled jobs dynamically (scoped to eligible alert members and active caregiver)
+  const scheduledJobs = useMemo(() => {
+    return computeScheduledJobs(
+      eligibleAlertMembers,
+      eligibleMonitoringPlans,
+      medicationLogs,
+      currentUser
+    );
+  }, [eligibleAlertMembers, eligibleMonitoringPlans, medicationLogs, currentUser]);
+
+  const dueJobs = useMemo(() => {
+    return scheduledJobs.filter(j => j.status === 'DUE_NOW');
+  }, [scheduledJobs]);
+
+  const eligibleCaregiverAlerts = useMemo(() => {
+    if (!currentUser) return caregiverAlerts;
+    const alertScope = activeRolePerms?.capabilities?.receive_alerts || 'none';
+    if (alertScope === 'full') return caregiverAlerts;
+
+    const allowedPatientIds = new Set(eligibleAlertMembers.map(m => m.id));
+    return caregiverAlerts.filter(a => 
+      (a.patientId && allowedPatientIds.has(a.patientId)) || a.caregiverId === currentUser.id
+    );
+  }, [caregiverAlerts, eligibleAlertMembers, currentUser, activeRolePerms]);
+
+  // Automated Caregiver Alert Dispatcher
+  useEffect(() => {
+    // If there is an active job due and no active toast, pick the first un-dismissed due job and trigger alert once
+    // Ensure the alert is user-centric (only pops up for the designated caregiver)
+    const firstDue = dueJobs.find(j => 
+      !dismissedAlertIds.has(j.id) && 
+      !hasAutoDispatchedRef.current.has(j.id) && 
+      (j.caregiverId === currentUser?.id || eligibleAlertMembers.some(m => m.id === j.patientId))
+    );
+    if (firstDue && !activeAlertToast) {
+      hasAutoDispatchedRef.current.add(firstDue.id);
+      const newAlert = createCaregiverAlertFromJob(firstDue);
+      setActiveAlertToast(newAlert);
+      setCaregiverAlerts(prev => [newAlert, ...prev]);
+      saveCaregiverAlertToDb(newAlert);
+    }
+  }, [dueJobs, dismissedAlertIds, activeAlertToast, currentUser, eligibleAlertMembers]);
 
   // Reconcile activeTab whenever persona or allowedScreens changes based on DB permissions
   useEffect(() => {
@@ -1554,8 +1598,10 @@ export default function App() {
         isOpen={isSchedulerModalOpen}
         onClose={() => setIsSchedulerModalOpen(false)}
         jobs={scheduledJobs}
-        alerts={caregiverAlerts}
-        members={currentHouseholdMembers}
+        alerts={eligibleCaregiverAlerts}
+        members={eligibleAlertMembers}
+        currentUser={currentUser}
+        totalHouseholdCount={currentHouseholdMembers.length}
         onTriggerSimulatedAlert={handleTriggerSimulatedAlert}
         onAcknowledgeAlert={handleAcknowledgeAlert}
         onNavigateToMedication={() => {
