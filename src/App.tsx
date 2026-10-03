@@ -241,7 +241,17 @@ export default function App() {
   const [medicationLogs, setMedicationLogs] = useState<MedicationLogEntry[]>(() => {
     try {
       const saved = localStorage.getItem('granpocket_med_logs');
-      return saved ? JSON.parse(saved) : INITIAL_MEDICATION_LOGS;
+      if (saved) {
+        const parsed: MedicationLogEntry[] = JSON.parse(saved);
+        // Data migration: ensure medlog-02 (Aspirin for Tan Ah Boon) is administered by Sarah Tan (Mom), not Siti Rahmah
+        return parsed.map(log => {
+          if (log.id === 'medlog-02' || (log.medicine?.toLowerCase().includes('aspirin') && log.givenBy?.includes('Siti'))) {
+            return { ...log, givenBy: 'Sarah Tan (Mom)' };
+          }
+          return log;
+        });
+      }
+      return INITIAL_MEDICATION_LOGS;
     } catch {
       return INITIAL_MEDICATION_LOGS;
     }
@@ -588,6 +598,38 @@ export default function App() {
       return false;
     });
   }, [currentHouseholdMembers, currentUser, activeRolePerms]);
+
+  // Dynamically filter eligible members and logs for Medication Log & Safety tab based on active role capabilities (Section 3 & 9)
+  const eligibleMedicationMembers = useMemo(() => {
+    if (!currentUser) return currentHouseholdMembers;
+    const medLogScope = activeRolePerms?.capabilities?.medication_log || 'none';
+
+    if (medLogScope === 'full') {
+      return currentHouseholdMembers;
+    }
+    if (medLogScope === 'care_recipients') {
+      return currentHouseholdMembers.filter(member => {
+        // Self or designated care recipient
+        if (member.id === currentUser.id) return true;
+        return member.careLinks?.some(link => link.caregiverPersonId === currentUser.id);
+      });
+    }
+    if (medLogScope === 'own') {
+      return currentHouseholdMembers.filter(member => member.id === currentUser.id);
+    }
+    return [];
+  }, [currentHouseholdMembers, currentUser, activeRolePerms]);
+
+  const eligibleMedicationLogs = useMemo(() => {
+    const allowedIds = new Set(eligibleMedicationMembers.map(m => m.id));
+    return medicationLogs.filter(log => allowedIds.has(log.subjectId));
+  }, [medicationLogs, eligibleMedicationMembers]);
+
+  // Dynamically filter active check-back home monitoring plans based on caregiving responsibilities
+  const eligibleMonitoringPlans = useMemo(() => {
+    const allowedIds = new Set(eligibleMedicationMembers.map(m => m.id));
+    return monitoringPlans.filter(plan => allowedIds.has(plan.subjectId));
+  }, [monitoringPlans, eligibleMedicationMembers]);
 
   // Reconcile activeTab whenever persona or allowedScreens changes based on DB permissions
   useEffect(() => {
@@ -1306,9 +1348,11 @@ export default function App() {
 
             {activeTab === 'medications' && (
               <MedicationLogView
-                logs={medicationLogs}
-                members={currentHouseholdMembers}
+                logs={eligibleMedicationLogs}
+                members={eligibleMedicationMembers}
                 selectedPerson={selectedPerson}
+                currentUser={currentUser}
+                totalHouseholdCount={currentHouseholdMembers.length}
                 onAddLog={handleAddMedicationLog}
                 language={language}
               />
@@ -1317,8 +1361,8 @@ export default function App() {
             {/* TAB 4: Home Monitoring */}
             {activeTab === 'monitoring' && (
               <HomeMonitoringView
-                plans={monitoringPlans}
-                members={currentHouseholdMembers}
+                plans={eligibleMonitoringPlans}
+                members={eligibleMedicationMembers}
                 selectedPerson={selectedPerson}
                 onUpdatePlan={updated =>
                   setMonitoringPlans(prev => prev.map(p => (p.id === updated.id ? updated : p)))

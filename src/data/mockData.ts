@@ -633,7 +633,7 @@ export const INITIAL_MEDICATION_LOGS: MedicationLogEntry[] = [
     id: 'medlog-02',
     subjectId: 'person-ahboon',
     subjectName: 'Tan Ah Boon (Grandpa, 78)',
-    givenBy: 'Siti Rahmah (Helper)',
+    givenBy: 'Sarah Tan (Mom)',
     medicine: 'Aspirin (Cardiprin 100mg)',
     dose: '1 tablet (100mg)',
     givenAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),

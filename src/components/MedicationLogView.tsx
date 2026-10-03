@@ -11,7 +11,8 @@ import {
   Bell, 
   Calendar,
   X,
-  Sparkles
+  Sparkles,
+  ShieldCheck
 } from 'lucide-react';
 import { HelperInfoButton } from './HelperInfoButton';
 import type { MedicationLogEntry, Person, Language } from '../types';
@@ -21,6 +22,8 @@ interface MedicationLogViewProps {
   logs: MedicationLogEntry[];
   members: Person[];
   selectedPerson: Person;
+  currentUser?: Person | null;
+  totalHouseholdCount?: number;
   onAddLog: (log: MedicationLogEntry) => void;
   language: Language;
 }
@@ -29,6 +32,8 @@ export const MedicationLogView: React.FC<MedicationLogViewProps> = ({
   logs,
   members,
   selectedPerson,
+  currentUser,
+  totalHouseholdCount,
   onAddLog,
   language,
 }) => {
@@ -40,12 +45,33 @@ export const MedicationLogView: React.FC<MedicationLogViewProps> = ({
   } | null>(null);
 
   // New Log Form
-  const [medSubjectId, setMedSubjectId] = useState(selectedPerson.id);
-  const [medName, setMedName] = useState('Infant Paracetamol Suspension (120mg/5ml)');
-  const [medDose, setMedDose] = useState('3.5 ml');
-  const [givenBy, setGivenBy] = useState('Sarah Tan (Mom)');
+  const defaultSubject = members.find(m => m.id === selectedPerson.id) || members[0];
+  const [medSubjectId, setMedSubjectId] = useState(defaultSubject?.id || members[0]?.id || '');
+  const [medName, setMedName] = useState(
+    defaultSubject?.id === 'person-lucas'
+      ? 'Infant Paracetamol Suspension (120mg/5ml)'
+      : 'Aspirin (Cardiprin 100mg)'
+  );
+  const [medDose, setMedDose] = useState(defaultSubject?.id === 'person-lucas' ? '3.5 ml' : '1 tablet (100mg)');
+  const defaultAdmin = currentUser ? `${currentUser.name} (${currentUser.relationshipLabel})` : 'Sarah Tan (Mom)';
+  const [givenBy, setGivenBy] = useState(defaultAdmin);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+
+  // Keep form in sync when currentUser or selectedPerson changes
+  React.useEffect(() => {
+    if (currentUser) {
+      setGivenBy(`${currentUser.name} (${currentUser.relationshipLabel})`);
+    }
+    const target = members.find(m => m.id === selectedPerson.id) || members[0];
+    if (target) {
+      setMedSubjectId(target.id);
+      if (target.id === 'person-lucas') {
+        setMedName('Infant Paracetamol Suspension (120mg/5ml)');
+        setMedDose('3.5 ml');
+      }
+    }
+  }, [currentUser, selectedPerson, members]);
 
   // Filter logs for selected person or all
   const [filterPersonId, setFilterPersonId] = useState<string>('all');
@@ -113,19 +139,27 @@ export const MedicationLogView: React.FC<MedicationLogViewProps> = ({
     setPhotoUrl(null);
   };
 
+  const isRestrictedByRbac = totalHouseholdCount !== undefined && members.length < totalHouseholdCount;
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-fadeIn pb-12">
       {/* Top Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-slate-200 rounded-3xl p-5 shadow-sm">
-        <div>
-          <h2 className="text-xl font-black text-slate-900 flex items-center space-x-2">
-            <Pill className="text-teal-600" size={22} />
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-[#14212B] border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm">
+        <div className="space-y-1">
+          <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center space-x-2">
+            <Pill className="text-teal-600 dark:text-teal-400" size={22} />
             <span>Shared Medication Log & Safety</span>
             <HelperInfoButton
               title="Shared Medication Log & Safety"
-              content="Real-time household visibility that prevents accidental double-dosing across family caregivers and domestic helpers. Every dose logged triggers interval validation before administration."
+              content="Real-time household visibility that prevents accidental double-dosing across family caregivers and domestic helpers. Governed dynamically by Section 3 & 9 of the Health Triage Architecture Specification and Singapore PDPA. Caregivers can view and administer doses for themselves and designated care recipients linked via Care Links."
             />
           </h2>
+          {isRestrictedByRbac && (
+            <div className="flex items-center gap-1.5 text-xs text-blue-700 dark:text-blue-400 font-bold">
+              <ShieldCheck size={14} className="text-blue-600 dark:text-blue-400" />
+              <span>RBAC Scoped: Authorized for {members.length} of {totalHouseholdCount} Household Members (Care Recipients Only)</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center space-x-2">
@@ -133,17 +167,29 @@ export const MedicationLogView: React.FC<MedicationLogViewProps> = ({
           <select
             value={filterPersonId}
             onChange={e => setFilterPersonId(e.target.value)}
-            className="text-xs p-2 rounded-xl border border-slate-200 bg-slate-50 font-semibold"
+            className="text-xs p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-semibold"
           >
-            <option value="all">All Family Members</option>
-            {members.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
+            <option value="all">
+              {isRestrictedByRbac ? `Authorized Members (${members.length})` : 'All Family Members'}
+            </option>
+            {members.map(m => {
+              const isSelf = m.id === currentUser?.id;
+              const isCareRecipient = !isSelf && m.careLinks?.some(cl => cl.caregiverPersonId === currentUser?.id);
+              return (
+                <option key={m.id} value={m.id}>
+                  {m.name} {isSelf ? '(Self)' : isCareRecipient ? '(Care Recipient)' : ''}
+                </option>
+              );
+            })}
           </select>
 
           <button
             onClick={() => {
-              setMedSubjectId(selectedPerson.id);
+              const target = members.find(m => m.id === selectedPerson.id) || members[0];
+              setMedSubjectId(target?.id || '');
+              if (currentUser) {
+                setGivenBy(`${currentUser.name} (${currentUser.relationshipLabel})`);
+              }
               setShowLogModal(true);
             }}
             className="flex items-center space-x-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow transition-all"
