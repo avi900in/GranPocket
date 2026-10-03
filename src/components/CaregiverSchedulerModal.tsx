@@ -305,7 +305,7 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
                           ))
                         ) : (
                           <div className="text-slate-600 dark:text-slate-300">
-                            Household Admin Notification Desk (+65 9234-5678)
+                            Household Admin Notification Desk ({currentUser?.phone || 'Primary Admin'})
                           </div>
                         )}
                       </div>

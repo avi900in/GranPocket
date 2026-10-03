@@ -37,6 +37,7 @@ import {
   fetchProposalsFromDb,
   updateProposalStatusInDb,
   fetchPersonsFromDb,
+  savePersonToDb,
   getDatabaseStats,
   type DatabaseStats,
   fetchCaregiverAlerts,
@@ -497,7 +498,11 @@ export default function App() {
             setKbProposals(dbProps);
           }
           if (dbPersons && dbPersons.length > 0) {
-            setMembers(dbPersons);
+            setMembers(prev => {
+              const dbIds = new Set(dbPersons.map(p => p.id));
+              const customMembers = prev.filter(p => !dbIds.has(p.id));
+              return [...dbPersons, ...customMembers];
+            });
           }
         } catch (dbErr) {
           console.warn('[App] SQLite auto-sync error:', dbErr);
@@ -648,14 +653,21 @@ export default function App() {
   }, [scheduledJobs]);
 
   const eligibleCaregiverAlerts = useMemo(() => {
-    if (!currentUser) return caregiverAlerts;
+    if (!currentUser) return [];
     const alertScope = activeRolePerms?.capabilities?.receive_alerts || 'none';
-    if (alertScope === 'full') return caregiverAlerts;
+    if (alertScope === 'none') return [];
 
     const allowedPatientIds = new Set(eligibleAlertMembers.map(m => m.id));
-    return caregiverAlerts.filter(a => 
-      (a.patientId && allowedPatientIds.has(a.patientId)) || a.caregiverId === currentUser.id
-    );
+    const allowedPatientNames = new Set(eligibleAlertMembers.map(m => m.name.toLowerCase()));
+
+    return caregiverAlerts.filter(a => {
+      // Must be strictly scoped to this household: either patient is an eligible member or caregiver matches current user
+      const matchesPatient = (a.patientId && allowedPatientIds.has(a.patientId)) || 
+                             (a.patientName && allowedPatientNames.has(a.patientName.toLowerCase()));
+      const matchesCaregiver = a.caregiverId === currentUser.id || 
+                               (a.caregiverName && a.caregiverName.toLowerCase() === currentUser.name.toLowerCase());
+      return matchesPatient || matchesCaregiver;
+    });
   }, [caregiverAlerts, eligibleAlertMembers, currentUser, activeRolePerms]);
 
   // Automated Caregiver Alert Dispatcher
@@ -1144,6 +1156,11 @@ export default function App() {
     if (newMedLogs.length > 0) {
       setMedicationLogs(prev => [...newMedLogs, ...prev]);
     }
+
+    // Persist new members to SQLite database
+    newMembersList.forEach(p => {
+      savePersonToDb(p);
+    });
 
     setHousehold(newHousehold);
     setCurrentUser(caregiverPerson);

@@ -171,19 +171,8 @@ export function computeScheduledJobs(
 
   // 2. Compute Monitoring Update Cadence Jobs
   for (const plan of plans.filter(p => p.status === 'active')) {
-    const person = members.find(m => m.id === plan.subjectId) || {
-      id: plan.subjectId,
-      name: plan.subjectName,
-      avatar: '👶',
-      careLinks: [],
-      medicalProfile: { conditions: [], allergies: [], intolerances: [], medications: [], vaccinations: [] },
-      dob: '2025-12-18',
-      sex: 'male',
-      relationshipLabel: 'Baby',
-      language: 'en',
-      hasLogin: false,
-      systemRole: 'DEPENDENT',
-    } as unknown as Person;
+    const person = members.find(m => m.id === plan.subjectId);
+    if (!person) continue;
 
     const caregiver = resolveCaregiverForPatient(person, members, currentCaregiver);
     const nextCheckTime = new Date(plan.nextCheckAt).getTime();

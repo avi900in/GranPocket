@@ -1097,6 +1097,16 @@ app.get("/api/db/persons", (req, res) => {
   }
 });
 
+app.post("/api/db/persons", (req, res) => {
+  try {
+    const person = req.body;
+    db.savePerson(person);
+    res.json({ success: true, message: "Patient saved to SQLite", person });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.put("/api/db/persons/:id", (req, res) => {
   try {
     const person = req.body;

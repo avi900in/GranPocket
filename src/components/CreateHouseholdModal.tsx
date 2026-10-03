@@ -78,13 +78,15 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
   // Quick preset templates for rapid testing
   const applyPreset = (preset: 'lim' | 'rahman' | 'kumar') => {
     setError(null);
+    const preservedPhone = initialPhone?.trim() || (caregiverPhone.trim() && !['9876-5432', '9123-8899', '9876-1122', '9555-4321'].includes(caregiverPhone.trim()) ? caregiverPhone : null);
+
     if (preset === 'lim') {
       setName('The Lim Family');
       setPostalCode('640456');
       setAddressText('Block 456 Jurong West St 41, #06-123, Singapore 640456');
       setCaregiverName('Marilyn Lim');
       setCaregiverRole('Mother');
-      setCaregiverPhone('9123-8899');
+      setCaregiverPhone(preservedPhone || '9123-8899');
       setSeedSampleData(true);
     } else if (preset === 'rahman') {
       setName('Rahman Household');
@@ -92,7 +94,7 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
       setAddressText('Block 123 Tampines Street 11, #04-789, Singapore 520123');
       setCaregiverName('Nurul Rahman');
       setCaregiverRole('Eldest Daughter');
-      setCaregiverPhone('9876-1122');
+      setCaregiverPhone(preservedPhone || '9876-1122');
       setSeedSampleData(true);
     } else {
       setName('Kumar Family');
@@ -100,7 +102,7 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
       setAddressText('Block 1 Outram Park, #09-45, Singapore 160001');
       setCaregiverName('Priya Kumar');
       setCaregiverRole('Mother & Primary Carer');
-      setCaregiverPhone('9555-4321');
+      setCaregiverPhone(preservedPhone || '9555-4321');
       setSeedSampleData(false);
     }
   };
