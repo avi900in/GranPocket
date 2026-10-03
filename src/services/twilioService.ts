@@ -1,7 +1,8 @@
 export const sendSms = async (to: string, body: string) => {
-  const accountSid = import.meta.env.VITE_TWILIO_ACCOUNT_SID;
-  const authToken = import.meta.env.VITE_TWILIO_AUTH_TOKEN;
-  const fromNumber = import.meta.env.VITE_TWILIO_FROM_NUMBER;
+  const env = (import.meta as any).env || {};
+  const accountSid = env.VITE_TWILIO_ACCOUNT_SID;
+  const authToken = env.VITE_TWILIO_AUTH_TOKEN;
+  const fromNumber = env.VITE_TWILIO_FROM_NUMBER;
 
   if (!accountSid || !authToken || !fromNumber) {
     console.warn('Twilio credentials not configured in environment variables.');
