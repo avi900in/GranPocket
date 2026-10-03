@@ -564,7 +564,7 @@ export default function App() {
 
   // Dynamically filter eligible triage subjects based on active role capabilities (Section 3 & 9 Architecture Capability Specification)
   const eligibleTriageMembers = useMemo(() => {
-    if (!currentUser) return currentHouseholdMembers;
+    if (!isLoggedIn || !currentUser) return [];
     const inquirySelfScope = activeRolePerms?.capabilities?.inquiry_self || 'own';
     const inquiryOthersScope = activeRolePerms?.capabilities?.inquiry_others || 'none';
 
@@ -587,7 +587,7 @@ export default function App() {
 
   // Dynamically filter eligible members and logs for Medication Log & Safety tab based on active role capabilities (Section 3 & 9)
   const eligibleMedicationMembers = useMemo(() => {
-    if (!currentUser) return currentHouseholdMembers;
+    if (!isLoggedIn || !currentUser) return [];
     const medLogScope = activeRolePerms?.capabilities?.medication_log || 'none';
 
     if (medLogScope === 'full') {
@@ -619,7 +619,7 @@ export default function App() {
 
   // Dynamically filter eligible members for scheduled alerts & jobs based on active role capabilities (Section 3 & 9: receive_alerts)
   const eligibleAlertMembers = useMemo(() => {
-    if (!currentUser) return currentHouseholdMembers;
+    if (!isLoggedIn || !currentUser) return [];
     const alertScope = activeRolePerms?.capabilities?.receive_alerts || 'none';
 
     if (alertScope === 'full') {
@@ -653,7 +653,7 @@ export default function App() {
   }, [scheduledJobs]);
 
   const eligibleCaregiverAlerts = useMemo(() => {
-    if (!currentUser) return [];
+    if (!isLoggedIn || !currentUser) return [];
     const alertScope = activeRolePerms?.capabilities?.receive_alerts || 'none';
     if (alertScope === 'none') return [];
 
@@ -672,12 +672,18 @@ export default function App() {
 
   // Automated Caregiver Alert Dispatcher
   useEffect(() => {
+    if (!isLoggedIn || !currentUser) {
+      setActiveAlertToast(null);
+      return;
+    }
+
     // If there is an active job due and no active toast, pick the first un-dismissed due job and trigger alert once
-    // Ensure the alert is user-centric (only pops up for the designated caregiver)
+    // Ensure the alert is user-centric (only pops up for the designated caregiver in this household)
     const firstDue = dueJobs.find(j => 
       !dismissedAlertIds.has(j.id) && 
       !hasAutoDispatchedRef.current.has(j.id) && 
-      (j.caregiverId === currentUser?.id || eligibleAlertMembers.some(m => m.id === j.patientId))
+      j.caregiverId === currentUser.id &&
+      eligibleAlertMembers.some(m => m.id === j.patientId)
     );
     if (firstDue && !activeAlertToast) {
       hasAutoDispatchedRef.current.add(firstDue.id);
@@ -686,11 +692,11 @@ export default function App() {
       setCaregiverAlerts(prev => [newAlert, ...prev]);
       saveCaregiverAlertToDb(newAlert);
     }
-  }, [dueJobs, dismissedAlertIds, activeAlertToast, currentUser, eligibleAlertMembers]);
+  }, [dueJobs, dismissedAlertIds, activeAlertToast, currentUser, eligibleAlertMembers, isLoggedIn]);
 
   // Dynamically filter members visible in Family Profiles based on active role capabilities (Section 3 & 9: view_own_profile & view_others_profile)
   const eligibleProfileMembers = useMemo(() => {
-    if (!currentUser) return currentHouseholdMembers;
+    if (!isLoggedIn || !currentUser) return [];
     const ownScope = activeRolePerms?.capabilities?.view_own_profile || 'none';
     const othersScope = activeRolePerms?.capabilities?.view_others_profile || 'none';
 
@@ -1162,6 +1168,8 @@ export default function App() {
       savePersonToDb(p);
     });
 
+    setActiveAlertToast(null);
+    hasAutoDispatchedRef.current.clear();
     setHousehold(newHousehold);
     setCurrentUser(caregiverPerson);
     setSelectedPerson(defaultSelectedPerson);
@@ -1236,6 +1244,8 @@ export default function App() {
   // STEP 1: Unauthenticated Flow -> Login Page (SRS AUTH-01 to AUTH-08)
   // Login success handler with automatic household & persona switching
   const handleLoginSuccess = (user: Person) => {
+    setActiveAlertToast(null);
+    hasAutoDispatchedRef.current.clear();
     setCurrentUser(user);
     setIsLoggedIn(true);
 
@@ -1306,6 +1316,8 @@ export default function App() {
     setIsLoggedIn(false);
     setCurrentUser(null);
     setCurrentResult(null);
+    setActiveAlertToast(null);
+    hasAutoDispatchedRef.current.clear();
     setTriageStep('select_patient');
     setHousehold(INITIAL_HOUSEHOLD);
     setSelectedPerson(members.find(m => m.id === 'person-lucas') || members[0]);
