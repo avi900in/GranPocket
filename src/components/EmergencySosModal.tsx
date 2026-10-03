@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   PhoneCall, 
   X, 
@@ -39,7 +39,38 @@ export const EmergencySosModal: React.FC<EmergencySosModalProps> = ({
   if (!isOpen) return null;
 
   const isPediatric = new Date().getFullYear() - new Date(person.dob).getFullYear() < 16;
-  const nearestHospitals = findNearestFacilities(address.lat, address.lng, {
+  
+  const [resolvedLat, setResolvedLat] = useState(address.lat);
+  const [resolvedLng, setResolvedLng] = useState(address.lng);
+
+  useEffect(() => {
+    let active = true;
+    const geocode = async () => {
+      const cleanPostal = address.postalCode?.replace(/[^0-9]/g, '');
+      if (cleanPostal && cleanPostal.length === 6) {
+        try {
+          const resp = await fetch(
+            `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${cleanPostal}&returnGeom=Y&getAddrDetails=Y`
+          );
+          if (resp.ok) {
+            const json = await resp.json();
+            if (json.results && json.results.length > 0 && active) {
+              const lat = parseFloat(json.results[0].LATITUDE);
+              const lng = parseFloat(json.results[0].LONGITUDE);
+              if (!isNaN(lat) && !isNaN(lng)) {
+                setResolvedLat(lat);
+                setResolvedLng(lng);
+              }
+            }
+          }
+        } catch {}
+      }
+    };
+    geocode();
+    return () => { active = false; };
+  }, [address.postalCode]);
+
+  const nearestHospitals = findNearestFacilities(resolvedLat, resolvedLng, {
     edOnly: true,
     pediatricOnly: isPediatric,
   });

@@ -190,7 +190,7 @@ export const HospitalFinderView: React.FC<HospitalFinderViewProps> = ({
     try {
       const osmQuery = query.toLowerCase().includes('singapore') ? query : `${query}, Singapore`;
       const resp = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(osmQuery)}&countrycodes=sg&limit=1&addressdetails=1`,
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(osmQuery)}&countrycodes=sg&limit=1&addressdetails=1&email=granpocket@example.com`,
         { headers: { 'Accept-Language': 'en' } }
       );
 

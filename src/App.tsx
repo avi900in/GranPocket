@@ -1230,16 +1230,26 @@ export default function App() {
     setTriageStep('select_patient');
   };
 
-  const primaryAddress = household.addresses[0] || {
-    id: 'addr-default',
-    householdId: household.id,
-    label: 'Home',
-    text: 'Block 123 Toa Payoh Lorong 1, #08-456, Singapore 310123',
-    postalCode: '310123',
-    lat: 1.3325,
-    lng: 103.8475,
-    isPrimary: true,
-  };
+  let primaryAddress = household.addresses?.[0];
+  if (primaryAddress && (!primaryAddress.lat || !primaryAddress.lng) && primaryAddress.postalCode) {
+    const geo = lookupSingaporePostalCode(primaryAddress.postalCode);
+    if (geo) {
+      primaryAddress = { ...primaryAddress, lat: geo.lat, lng: geo.lng };
+    }
+  }
+  
+  if (!primaryAddress) {
+    primaryAddress = {
+      id: 'addr-default',
+      householdId: household.id,
+      label: 'Home',
+      text: 'Block 123 Toa Payoh Lorong 1, #08-456, Singapore 310123',
+      postalCode: '310123',
+      lat: 1.3325,
+      lng: 103.8475,
+      isPrimary: true,
+    };
+  }
 
   // STEP 1: Unauthenticated Flow -> Login Page (SRS AUTH-01 to AUTH-08)
   // Login success handler with automatic household & persona switching
