@@ -39,3 +39,4 @@ yarn-error.log*
 
 # Zero byte or temporary db files in root
 /granpocket.db
+*.sqlite

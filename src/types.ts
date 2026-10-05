@@ -67,6 +67,7 @@ export interface Person {
   language: Language;
   hasLogin: boolean;
   phone?: string;
+  postalCode?: string;
   systemRole: SystemRole;
   avatar?: string;
   medicalProfile: MedicalProfile;
@@ -246,6 +247,12 @@ export interface TriageResult {
   agenticLogId?: string;
   agenticTransitions?: any[];
   agenticAttestation?: any;
+  agenticConfidence?: number;
+  agenticProvenance?: any;
+  deterministicAction?: string;
+  otcMedications?: string[];
+  homeCare?: string[];
+  telemedPartners?: string[];
   homeMedicationAdvice?: {
     medicationName: string;
     dosageInstruction: string;
@@ -477,7 +484,8 @@ export type ScreenKey =
   | 'clinical_kb' 
   | 'pdpa_audit' 
   | 'owner_admin'
-  | 'feedback';
+  | 'feedback'
+  | 'app_workspace';
 
 export type RoleCapabilityKey =
   | 'edit_household'        // Create/edit household, addresses, members, medical info, insurance
@@ -505,4 +513,11 @@ export interface HouseholdRbacConfig {
   householdId: string;
   rolePermissions: Record<SystemRole, RolePermissions>;
   userScreenOverrides?: Record<string, ScreenKey[]>; // personId -> ScreenKey[]
+}
+
+export interface InsuranceCompany {
+  id: string;
+  name: string;
+  logoUrl?: string;
+  panelHospitals: string[];
 }

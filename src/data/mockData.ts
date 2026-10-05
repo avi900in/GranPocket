@@ -626,7 +626,7 @@ export const INITIAL_MEDICATION_LOGS: MedicationLogEntry[] = [
     medicine: 'Infant Paracetamol Suspension (120mg/5ml)',
     dose: '3.5 ml (orally via syringe)',
     givenAt: new Date(Date.now() - 1.5 * 60 * 60 * 1000).toISOString(), // 1.5 hours ago (triggers duplicate warning if given again now!)
-    photoUrl: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60',
+    photoUrl: '/images/axcel_paracetamol_250.jpg',
     notes: 'Lucas had 38.8C fever. Settled down slightly after sponge bath.',
   },
   {

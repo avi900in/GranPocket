@@ -139,11 +139,20 @@ export function runDeterministicSafetyNet(
   }
 
   // General Red-Line
-  if (content.includes('unconscious') || content.includes('not breathing')) {
+  if (content.includes('unconscious') || content.includes('not breathing') || content.includes('labored breathing') || content.includes('seizure') || content.includes('fit') || content.includes('convuls') || content.includes('chok')) {
     return {
       tripped: true,
-      reason: 'Critical: Unconscious or not breathing',
+      reason: 'Critical: Unconscious, breathing distress, choking, or active seizure',
       ruleId: 'REDLINE-GENERAL-CRITICAL'
+    };
+  }
+
+  // UI Emergency Bypass Red-Line
+  if (answers && answers.emergency_bypass === true) {
+    return {
+      tripped: true,
+      reason: 'Critical: Emergency keyword detected by frontend safety net',
+      ruleId: 'REDLINE-FRONTEND-BYPASS'
     };
   }
 

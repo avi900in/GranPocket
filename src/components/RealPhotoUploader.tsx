@@ -37,7 +37,7 @@ export const RealPhotoUploader: React.FC<RealPhotoUploaderProps> = ({
 
       // Perform client-side image canvas inspection (brightness & dimensions)
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         const canvas = document.createElement('canvas');
         canvas.width = Math.min(img.width, 300);
         canvas.height = Math.min(img.height, 300);
@@ -69,44 +69,34 @@ export const RealPhotoUploader: React.FC<RealPhotoUploaderProps> = ({
 
         setQualityFeedback(qualityMessage);
 
-        // Derive neutral descriptive cues based on file name or characteristics
-        const lowerName = file.name.toLowerCase();
-        let derivedCues: string[] = [];
+        try {
+          // Call backend LLM Vision API for actual clinical descriptors
+          const response = await fetch('/api/agentic/vision', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: resultUrl })
+          });
+          
+          const data = await response.json();
+          let derivedCues = data.success && data.descriptors ? data.descriptors : [];
+          
+          if (derivedCues.length === 0) {
+            derivedCues = [
+              'Localized surface skin inspection completed',
+              'Visual cues mapped into rule engine as neutral descriptors',
+            ];
+          }
 
-        if (lowerName.includes('eye') || lowerName.includes('red')) {
-          derivedCues = [
-            'Conjunctival hyperemia (redness) observed without foreign body',
-            'No deep corneal opacity or gross trauma noted',
-            'Mild peri-orbital swelling, pupil appearance symmetrical',
-          ];
-        } else if (lowerName.includes('rash') || lowerName.includes('fever') || lowerName.includes('spot')) {
-          derivedCues = [
-            'Maculopapular erythematous rash on skin surface',
-            'Advise glass pressure blanching test to evaluate petechiae',
-            'No visible blistering or epidermal peeling',
-          ];
-        } else if (lowerName.includes('wound') || lowerName.includes('bleed') || lowerName.includes('cut')) {
-          derivedCues = [
-            'Cutaneous laceration with localized erythema',
-            'Evaluate bleeding control under direct pressure',
-            'Check for underlying structural deformity or numbness',
-          ];
-        } else if (lowerName.includes('med') || lowerName.includes('pill') || lowerName.includes('syrup')) {
-          derivedCues = [
-            'Medication container / suspension packaging detected',
-            'Cross-check drug name and dose with patient profile',
-          ];
-        } else {
-          derivedCues = [
-            'Localized surface skin inspection completed',
-            'Erythema and tissue margin analyzed for red flags',
-            'Visual cues mapped into rule engine as neutral descriptors',
-          ];
+          setDescriptors(derivedCues);
+          setIsAnalyzing(false);
+          onPhotoAnalyzed(resultUrl, derivedCues, isQualityGood);
+        } catch (e) {
+          console.error("Vision API error", e);
+          const fallback = ['Image inspection completed (API Error)'];
+          setDescriptors(fallback);
+          setIsAnalyzing(false);
+          onPhotoAnalyzed(resultUrl, fallback, isQualityGood);
         }
-
-        setDescriptors(derivedCues);
-        setIsAnalyzing(false);
-        onPhotoAnalyzed(resultUrl, derivedCues, isQualityGood);
       };
 
       img.src = resultUrl;

@@ -93,74 +93,46 @@ export default function App() {
   const toggleDarkMode = () => setIsDarkMode(prev => !prev);
 
   // Global State (Persisted with localStorage for multi-family & custom data support)
-  const [allHouseholds, setAllHouseholds] = useState<Household[]>(() => {
-    try {
-      const saved = localStorage.getItem('granpocket_all_households');
-      if (saved) {
-        const parsed: Household[] = JSON.parse(saved);
-        const seen = new Set<string>();
-        const unique: Household[] = [];
-        for (const h of parsed) {
-          const norm = h.name.trim().toLowerCase();
-          if (!seen.has(norm)) {
-            seen.add(norm);
-            unique.push(h);
-          }
-        }
-        return unique;
-      }
-      return ALL_HOUSEHOLDS;
-    } catch {
-      return ALL_HOUSEHOLDS;
-    }
-  });
+  const [allHouseholds, setAllHouseholds] = useState<Household[]>(ALL_HOUSEHOLDS);
 
-  const [household, setHousehold] = useState<Household>(() => {
-    try {
+  const [household, setHousehold] = useState<Household>(INITIAL_HOUSEHOLD);
+
+  const [members, setMembers] = useState<Person[]>(INITIAL_MEMBERS);
+
+  // Fetch initial data from server
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/db/households').then(r => r.json()),
+      fetch('/api/db/persons').then(r => r.json())
+    ]).then(([hhData, pData]) => {
+      let loadedHouseholds = ALL_HOUSEHOLDS;
+      if (hhData.success && hhData.households.length > 0) {
+        loadedHouseholds = hhData.households;
+      }
+      setAllHouseholds(loadedHouseholds);
+
+      let loadedMembers = INITIAL_MEMBERS;
+      if (pData.success && pData.persons.length > 0) {
+        loadedMembers = pData.persons;
+      }
+      setMembers(loadedMembers);
+
       const savedId = localStorage.getItem('granpocket_active_household_id');
       if (savedId) {
-        const found = allHouseholds.find(h => h.id === savedId);
-        if (found) return found;
+        const found = loadedHouseholds.find(h => h.id === savedId);
+        if (found) setHousehold(found);
+      } else {
+        setHousehold(loadedHouseholds[0] || INITIAL_HOUSEHOLD);
       }
-    } catch {}
-    return allHouseholds[0] || INITIAL_HOUSEHOLD;
-  });
+    }).catch(err => {
+      console.error('Failed to load data from server', err);
+      setAllHouseholds(ALL_HOUSEHOLDS);
+      setMembers(INITIAL_MEMBERS);
+      setHousehold(ALL_HOUSEHOLDS[0] || INITIAL_HOUSEHOLD);
+    });
+  }, []);
 
-  const [members, setMembers] = useState<Person[]>(() => {
-    try {
-      const saved = localStorage.getItem('granpocket_members');
-      if (saved) {
-        const parsed: Person[] = JSON.parse(saved);
-        const seen = new Set<string>();
-        return parsed.filter(m => {
-          const key = `${m.householdId}_${m.name.trim().toLowerCase()}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-      }
-      return INITIAL_MEMBERS;
-    } catch {
-      return INITIAL_MEMBERS;
-    }
-  });
-
-  // Sync households and members to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('granpocket_all_households', JSON.stringify(allHouseholds));
-    } catch (e) {
-      console.error('Failed to persist households', e);
-    }
-  }, [allHouseholds]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('granpocket_members', JSON.stringify(members));
-    } catch (e) {
-      console.error('Failed to persist members', e);
-    }
-  }, [members]);
+  // (Removed localStorage sync for households and members)
 
   useEffect(() => {
     try {
@@ -244,8 +216,11 @@ export default function App() {
       const saved = localStorage.getItem('granpocket_med_logs');
       if (saved) {
         const parsed: MedicationLogEntry[] = JSON.parse(saved);
-        // Data migration: ensure medlog-02 (Aspirin for Tan Ah Boon) is administered by Sarah Tan (Mom), not Siti Rahmah
+        // Data migration: ensure medlog-02 administered by Sarah Tan, and medlog-01 uses latest Axcel Paracetamol image
         return parsed.map(log => {
+          if (log.id === 'medlog-01' && (log.photoUrl?.includes('unsplash') || !log.photoUrl)) {
+            return { ...log, photoUrl: '/images/axcel_paracetamol_250.jpg' };
+          }
           if (log.id === 'medlog-02' || (log.medicine?.toLowerCase().includes('aspirin') && log.givenBy?.includes('Siti'))) {
             return { ...log, givenBy: 'Sarah Tan (Mom)' };
           }
@@ -814,6 +789,7 @@ export default function App() {
   // Add Member Handler
   const handleAddMember = (newPerson: Person) => {
     setMembers(prev => [...prev, newPerson]);
+    fetch('/api/db/persons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newPerson) }).catch(console.error);
 
     const newAudit: AuditEvent = {
       id: `audit-mem-${Date.now()}`,
@@ -829,8 +805,18 @@ export default function App() {
   // Update Member Handler
   const handleUpdatePerson = (updated: Person) => {
     setMembers(prev => prev.map(m => (m.id === updated.id ? updated : m)));
+    fetch('/api/db/persons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated) }).catch(console.error);
     if (selectedPerson.id === updated.id) {
       setSelectedPerson(updated);
+    }
+  };
+
+  // Delete Member Handler
+  const handleDeleteMember = (personId: string) => {
+    setMembers(prev => prev.filter(m => m.id !== personId));
+    fetch(`/api/db/persons/${personId}`, { method: 'DELETE' }).catch(console.error);
+    if (selectedPerson.id === personId && currentUser) {
+      setSelectedPerson(currentUser);
     }
   };
 
@@ -862,6 +848,33 @@ export default function App() {
     };
 
     setMonitoringPlans(prev => [newPlan, ...prev]);
+
+    // Add OTC medications to person profile if they exist
+    if (currentResult.otcMedications && currentResult.otcMedications.length > 0) {
+      const updatedPerson = { ...selectedPerson };
+      if (!updatedPerson.medicalProfile) {
+        updatedPerson.medicalProfile = { conditions: [], medications: [], allergies: [] };
+      }
+      
+      const existingMeds = updatedPerson.medicalProfile.medications || [];
+      const newMedsToAdd = currentResult.otcMedications.filter(
+        newMed => !existingMeds.some(m => m.name.toLowerCase() === newMed.toLowerCase())
+      ).map(med => ({
+        id: `med-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        name: med,
+        dose: 'As directed',
+        frequency: 'As needed (PRN)',
+        minIntervalHours: 4, // Default safety interval for OTC
+      }));
+
+      if (newMedsToAdd.length > 0) {
+        updatedPerson.medicalProfile.medications = [...existingMeds, ...newMedsToAdd];
+        handleUpdatePerson(updatedPerson);
+      }
+    }
+
+    // Trigger toast notification
+    showToast('Care Plan and OTC Medications integrated with Scheduler.');
     setActiveTab('monitoring');
   };
 
@@ -1019,6 +1032,7 @@ export default function App() {
       phone: data.caregiverPhone,
       systemRole: 'ADMIN',
       avatar: avatar,
+      postalCode: data.postalCode,
       medicalProfile: {
         bloodType: 'O+',
         conditions: [],
@@ -1047,6 +1061,7 @@ export default function App() {
         hasLogin: false,
         systemRole: 'DEPENDENT',
         avatar: '👧🏻',
+        postalCode: data.postalCode,
         careLinks: [
           { caregiverPersonId: caregiverPerson.id, recipientPersonId: childId, type: 'primary_caregiver' },
         ],
@@ -1086,6 +1101,7 @@ export default function App() {
         hasLogin: false,
         systemRole: 'DEPENDENT',
         avatar: '👵',
+        postalCode: data.postalCode,
         careLinks: [
           { caregiverPersonId: caregiverPerson.id, recipientPersonId: grandmaId, type: 'primary_caregiver' },
         ],
@@ -1142,6 +1158,8 @@ export default function App() {
     }
 
     // Prevent duplicates by checking existing household name
+    fetch('/api/db/households', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newHousehold) }).catch(console.error);
+    newMembersList.forEach(m => fetch('/api/db/persons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m) }).catch(console.error));
     setAllHouseholds(prev => {
       const existingIdx = prev.findIndex(h => h.name.trim().toLowerCase() === newHousehold.name.trim().toLowerCase());
       if (existingIdx >= 0) {
@@ -1375,6 +1393,7 @@ export default function App() {
           onCreateHousehold={handleCreateHousehold}
           language={language}
           initialPhone={createHouseholdInitialPhone}
+          existingPhones={members.map(m => m.phone).filter((p): p is string => !!p)}
         />
       </div>
     );
@@ -1494,6 +1513,7 @@ export default function App() {
                   onOpenSos={() => setIsSosOpen(true)}
                   onCreateMonitoringPlan={handleCreateMonitoringPlan}
                   onRemoveAilment={handleRemoveAilment}
+                  onOpenFacilities={() => setActiveTab('facilities')}
                 />
               ) : (
                 <TriageFlowView
@@ -1526,6 +1546,7 @@ export default function App() {
                 allHouseholds={currentUser?.systemRole === 'APP_OWNER' ? allHouseholds : undefined}
                 onSwitchHousehold={handleSwitchHousehold}
                 onResetDemoData={handleResetDemoData}
+                onDeleteMember={handleDeleteMember}
               />
             )}
 
@@ -1577,50 +1598,7 @@ export default function App() {
               />
             )}
 
-            {/* TAB 6: Clinical Review Console */}
-            {activeTab === 'clinical_kb' && (
-              (allowedScreens.includes('clinical_kb') || currentUser?.systemRole === 'APP_OWNER') ? (
-                <ClinicalKbConsoleView
-                  proposals={kbProposals}
-                  onApproveProposal={handleApproveProposal}
-                  onDeleteProposal={handleDeleteProposal}
-                  onMoveToPendingProposal={handleMoveToPendingProposal}
-                  onRefreshProposals={async () => {
-                    const dbProps = await fetchProposalsFromDb();
-                    if (dbProps && dbProps.length > 0) {
-                      setKbProposals(dbProps);
-                    }
-                  }}
-                  environmentMode={environmentMode}
-                  onToggleEnvironmentMode={setEnvironmentMode}
-                  language={language}
-                />
-              ) : (
-                <div className="bg-white border border-slate-200 rounded-3xl p-8 max-w-md mx-auto text-center space-y-4 shadow-sm my-12 animate-fadeIn">
-                  <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-2xl border border-indigo-200">
-                    🔒
-                  </div>
-                  <h3 className="text-lg font-black text-slate-900">App Owner Access Required</h3>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    The Clinical Content Governance & Review Console is exclusively reserved for the 
-                    <strong> App Owner & Medical Director</strong> persona (SMC Clinician sign-off).
-                  </p>
-                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-500">
-                    Active Persona: <strong className="text-slate-800">{currentUser?.name}</strong> ({currentUser?.relationshipLabel || currentUser?.systemRole})
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const evelyn = members.find(m => m.systemRole === 'APP_OWNER');
-                      if (evelyn) handleLoginSuccess(evelyn);
-                    }}
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow transition-all"
-                  >
-                    Switch to Dr. Evelyn Lim (App Owner Persona)
-                  </button>
-                </div>
-              )
-            )}
+
 
             {/* TAB 7: PDPA & Audit Log */}
             {activeTab === 'pdpa_audit' && (
@@ -1636,8 +1614,8 @@ export default function App() {
             )}
 
             {/* TAB 8: App Owner Administration & Integrations Hub */}
-            {activeTab === 'owner_admin' && (
-              (allowedScreens.includes('owner_admin') || currentUser?.systemRole === 'APP_OWNER') ? (
+            {(activeTab === 'owner_admin' || activeTab === 'app_workspace') && (
+              (allowedScreens.includes(activeTab as any) || currentUser?.systemRole === 'APP_OWNER') ? (
                 <AppOwnerPortalView
                   currentUser={currentUser}
                   household={household}
@@ -1655,6 +1633,17 @@ export default function App() {
                   rolePermissions={rolePermissions}
                   onUpdateRolePermissions={handleSaveRolePermissions}
                   onResetRolePermissions={handleResetRolePermissions}
+                  menuMode={activeTab === 'owner_admin' ? 'clinical_lab' : 'app_workspace'}
+                  proposals={kbProposals}
+                  onApproveProposal={handleApproveProposal}
+                  onDeleteProposal={handleDeleteProposal}
+                  onMoveToPendingProposal={handleMoveToPendingProposal}
+                  onRefreshProposals={async () => {
+                    const dbProps = await fetchProposalsFromDb();
+                    if (dbProps && dbProps.length > 0) {
+                      setKbProposals(dbProps);
+                    }
+                  }}
                 />
               ) : (
                 <div className="bg-white border border-slate-200 rounded-3xl p-8 max-w-md mx-auto text-center space-y-4 shadow-sm my-12 animate-fadeIn">

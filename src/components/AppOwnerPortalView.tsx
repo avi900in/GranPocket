@@ -50,7 +50,8 @@ import {
   Star,
   ThumbsUp,
   CheckCircle,
-  ShieldAlert
+  ShieldAlert,
+  BrainCircuit
 } from 'lucide-react';
 import type {
   Person,
@@ -63,13 +64,17 @@ import type {
   RolePermissions,
   ScreenKey,
   RoleCapabilityKey,
-  HouseholdRbacConfig
+  HouseholdRbacConfig,
+  KbProposal,
+  InsuranceCompany
 } from '../types';
 import { DEFAULT_ROLE_PERMISSIONS, ALL_SCREENS_META, CAPABILITIES_META } from '../data/defaultRbac';
 import { AILMENTS, RED_FLAG_RULES, AGENTIC_KNOWLEDGE_REPOSITORY } from '../engine/triageEngine';
 import { SINGAPORE_FACILITIES } from '../data/mockData';
 import { lookupSingaporePostalCode } from '../engine/singaporeData';
 import { MultiAgentSimulatorView } from './MultiAgentSimulatorView';
+import { ClinicalKbConsoleView } from './ClinicalKbConsoleView';
+import { AgenticKnowledgeHarvester } from './AgenticKnowledgeHarvester';
 import { HelperInfoButton } from './HelperInfoButton';
 import {
   fetchCustomerFeedback,
@@ -95,9 +100,16 @@ interface AppOwnerPortalViewProps {
   rolePermissions?: Record<SystemRole, RolePermissions>;
   onUpdateRolePermissions?: (newPerms: Record<SystemRole, RolePermissions>) => Promise<boolean>;
   onResetRolePermissions?: () => Promise<boolean>;
+  menuMode?: 'clinical_lab' | 'app_workspace';
+  proposals?: KbProposal[];
+  onApproveProposal?: (id: string, overrides: any) => void;
+  onDeleteProposal?: (id: string) => void;
+  onMoveToPendingProposal?: (id: string) => void;
+  onRefreshProposals?: () => Promise<void>;
 }
 
 type SubTab = 
+  | 'harvesting'
   | 'rbac' 
   | 'rules' 
   | 'simulation'
@@ -126,8 +138,20 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
   rolePermissions: initialRolePermissions,
   onUpdateRolePermissions,
   onResetRolePermissions,
+  menuMode = 'app_workspace',
+  proposals = [],
+  onApproveProposal,
+  onDeleteProposal,
+  onMoveToPendingProposal,
+  onRefreshProposals
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>('rbac');
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>(menuMode === 'clinical_lab' ? 'rules' : 'rbac');
+  
+  // Update active sub-tab if menuMode changes
+  useEffect(() => {
+    setActiveSubTab(menuMode === 'clinical_lab' ? 'rules' : 'rbac');
+  }, [menuMode]);
+
   const [integrationsDropdownOpen, setIntegrationsDropdownOpen] = useState(false);
   const integrationsDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -144,6 +168,15 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
       document.removeEventListener('mousedown', handleOutsideClick);
     };
   }, [integrationsDropdownOpen]);
+
+  // Insurance Registry State
+  const [insuranceCompanies, setInsuranceCompanies] = useState<InsuranceCompany[]>([
+    { id: 'ge', name: 'Great Eastern', panelHospitals: ['sgh', 'cgh'] },
+    { id: 'aia', name: 'AIA Singapore', panelHospitals: ['nuh', 'kkh'] }
+  ]);
+  const [isAddingInsurance, setIsAddingInsurance] = useState(false);
+  const [newInsuranceName, setNewInsuranceName] = useState('');
+  const [newInsurancePanels, setNewInsurancePanels] = useState<string[]>([]);
 
   // ==========================================
   // KEY STATISTICS & CUSTOMER FEEDBACK STATE
@@ -371,7 +404,13 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
   // ==========================================
   // 2.1 ML DATASET PIPELINE STATE (Spec §4 & §5)
   // ==========================================
-  const [ruleBuilderView, setRuleBuilderView] = useState<'explorer' | 'ml_pipeline' | 'author'>('explorer');
+  const [ruleBuilderView, setRuleBuilderView] = useState<'explorer' | 'ml_pipeline' | 'author' | 'unified'>('explorer');
+  const [editingUxRuleId, setEditingUxRuleId] = useState<string | null>(null);
+  
+  // Dummy local state to simulate fetching from triage_decisions
+  const [uxMappings, setUxMappings] = useState<Record<string, { action: string, meds: string, partners: string }>>({
+    'COLD-VIRAL-001': { action: 'Home Monitoring', meds: '["Prospan"]', partners: '[]' }
+  });
   const [selectedDataset, setSelectedDataset] = useState<'mimic_iv' | 'moh_cpg' | 'nuhs_urgent' | 'custom'>('mimic_iv');
   const [customDatasetName, setCustomDatasetName] = useState<string>('pediatric_urgent_feed_2026.csv');
   const [customRecordCount, setCustomRecordCount] = useState<number>(6400);
@@ -1008,35 +1047,7 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
   };
 
   // ==========================================
-  // 6. INSURANCE INTEGRATIONS STATE
-  // ==========================================
-  const [elogPatientName, setElogPatientName] = useState('Lucas Tan');
-  const [elogInsurer, setElogInsurer] = useState('Great Eastern (GREAT SupremeHealth)');
-  const [elogHospital, setElogHospital] = useState("KK Women's and Children's Hospital");
-  const [elogDiagnosis, setElogDiagnosis] = useState('Acute Bronchiolitis / Pediatric Respiratory Distress');
-  const [elogTospCode, setElogTospCode] = useState('TOSP-RESP-04');
-  const [elogEstBill, setElogEstBill] = useState(4800);
-  const [elogResult, setElogResult] = useState<{
-    referenceNo: string;
-    approvedAmount: number;
-    patientCashCopay: number;
-    mediSaveClaimable: number;
-    status: 'APPROVED' | 'REQUIRES_MANUAL_REVIEW';
-  } | null>(null);
 
-  const handleSimulateElog = (e: React.FormEvent) => {
-    e.preventDefault();
-    const approved = Math.round(elogEstBill * 0.95);
-    const copay = elogEstBill - approved;
-    setElogResult({
-      referenceNo: `ELOG-SG-${Date.now().toString().slice(-6)}`,
-      approvedAmount: approved,
-      patientCashCopay: copay,
-      mediSaveClaimable: Math.min(copay, 650),
-      status: 'APPROVED',
-    });
-    showToast('e-Letter of Guarantee (eLOG) pre-authorization generated successfully!');
-  };
 
   // ==========================================
   // 7. WEARABLES (APPLE WATCH) STATE
@@ -1094,7 +1105,7 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
           <div className="space-y-1.5">
             <div className="inline-flex items-center gap-2 bg-indigo-500/20 text-indigo-200 text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider border border-indigo-400/30">
               <Shield size={14} className="text-teal-400" />
-              <span>App Owner Administration & Integrations Hub</span>
+              <span>{menuMode === 'clinical_lab' ? 'App Owner Clinical Lab' : 'App Workspace Administration & Integrations Hub'}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-3">
               <span>{currentUser?.name || 'Dr. Evelyn Lim'}</span>
@@ -1107,180 +1118,250 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
 
         {/* Sub-Navigation Tabs */}
         <div className="mt-6 sm:mt-8 flex items-center gap-1.5 sm:gap-2 flex-wrap border-t border-slate-700/60 pt-3 sm:pt-4 relative z-30 overflow-visible">
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('rbac')}
-            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeSubTab === 'rbac'
-                ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                : 'text-slate-300 hover:text-white hover:bg-white/10'
-            }`}
-          >
-            <Users size={14} />
-            <span>RBAC & Permissions</span>
-          </button>
+          {menuMode === 'clinical_lab' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('harvesting')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'harvesting'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <FileCheck size={14} />
+                <span>Override Rule Harvesting</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('rules')}
-            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeSubTab === 'rules'
-                ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                : 'text-slate-300 hover:text-white hover:bg-white/10'
-            }`}
-          >
-            <Sliders size={14} />
-            <span>Clinical Rule Builder</span>
-            {customRules.length > 0 && (
-              <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full">
-                +{customRules.length}
-              </span>
-            )}
-          </button>
-
-          {/* Multi-Agent Triage Simulator */}
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('simulation')}
-            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeSubTab === 'simulation'
-                ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                : 'text-slate-300 hover:text-white hover:bg-white/10'
-            }`}
-          >
-            <Bot size={14} className={activeSubTab === 'simulation' ? 'text-slate-950' : 'text-teal-400'} />
-            <span>Agentic Triage Simulator</span>
-            <span className="bg-indigo-500 text-white text-[8px] font-black px-1 py-0.2 rounded-full uppercase tracking-wider">
-              Live Trace
-            </span>
-          </button>
-
-          {/* NEW: Key Statistics Screen */}
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('statistics')}
-            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeSubTab === 'statistics'
-                ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                : 'text-slate-300 hover:text-white hover:bg-white/10'
-            }`}
-          >
-            <BarChart3 size={14} className={activeSubTab === 'statistics' ? 'text-slate-950' : 'text-teal-400'} />
-            <span>Key Statistics</span>
-          </button>
-
-          {/* NEW: Customer Feedback List */}
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('feedback')}
-            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeSubTab === 'feedback'
-                ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                : 'text-slate-300 hover:text-white hover:bg-white/10'
-            }`}
-          >
-            <MessageSquareHeart size={14} className={activeSubTab === 'feedback' ? 'text-slate-950' : 'text-amber-400'} />
-            <span>Customer Feedback</span>
-            {feedbackList.length > 0 && (
-              <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full">
-                {feedbackList.length}
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('hospitals')}
-            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeSubTab === 'hospitals'
-                ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                : 'text-slate-300 hover:text-white hover:bg-white/10'
-            }`}
-          >
-            <Building2 size={14} />
-            <span>Hospital Registry</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('weather')}
-            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeSubTab === 'weather'
-                ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                : 'text-slate-300 hover:text-white hover:bg-white/10'
-            }`}
-          >
-            <CloudSun size={14} />
-            <span>Environment</span>
-          </button>
-
-          {/* Grouped Integrations & Devices Dropdown Menu (Dark shade without background blurring) */}
-          <div className="relative" ref={integrationsDropdownRef}>
-            <button
-              type="button"
-              onClick={() => setIntegrationsDropdownOpen(!integrationsDropdownOpen)}
-              className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                ['bluetooth', 'insurance', 'wearables'].includes(activeSubTab)
-                  ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
-              }`}
-            >
-              <Cpu size={14} />
-              <span>Integrations</span>
-              {['bluetooth', 'insurance', 'wearables'].includes(activeSubTab) && (
-                <span className="text-[10px] opacity-80 font-normal">
-                  ({activeSubTab === 'bluetooth' ? 'Bluetooth' : activeSubTab === 'insurance' ? 'Insurance' : 'Wearables'})
-                </span>
-              )}
-              <ChevronDown size={13} className={`transition-transform duration-200 ${integrationsDropdownOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {integrationsDropdownOpen && (
-              <div className="absolute top-full right-0 mt-1.5 w-56 bg-[#070D14] border border-slate-700/90 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] py-1.5 z-50 animate-fadeIn ring-1 ring-slate-800">
+              <div className="relative flex items-center group">
                 <button
                   type="button"
-                  onClick={() => {
-                    setActiveSubTab('bluetooth');
-                    setIntegrationsDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-3.5 py-2 text-xs font-medium flex items-center gap-2.5 transition-all ${
-                    activeSubTab === 'bluetooth' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  onClick={() => setActiveSubTab('jarvis_arh')}
+                  className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                    activeSubTab === 'jarvis_arh'
+                      ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                      : 'text-slate-300 hover:text-white hover:bg-white/10'
                   }`}
                 >
-                  <Bluetooth size={14} className="text-teal-400" />
-                  <span>Bluetooth Integrations</span>
+                  <BrainCircuit size={14} />
+                  <span>Jarvis - ARH</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveSubTab('insurance');
-                    setIntegrationsDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-3.5 py-2 text-xs font-medium flex items-center gap-2.5 transition-all ${
-                    activeSubTab === 'insurance' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
-                >
-                  <CreditCard size={14} className="text-blue-400" />
-                  <span>Insurance Integrations</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveSubTab('wearables');
-                    setIntegrationsDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-3.5 py-2 text-xs font-medium flex items-center gap-2.5 transition-all ${
-                    activeSubTab === 'wearables' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
-                >
-                  <Watch size={14} className="text-purple-400" />
-                  <span>Known Wearables</span>
-                </button>
+                <div className="ml-1 text-slate-400 hover:text-white cursor-help">
+                  <HelpCircle size={14} />
+                </div>
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-64 p-3 bg-slate-900 border border-slate-700 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-[10px] text-slate-300 pointer-events-none">
+                  <strong className="text-white block mb-1">Agentic Rule Harvester (ARH)</strong>
+                  A pure multi-agentic LLM workflow that dynamically reads inputs (websites, PDFs, CSVs), understands clinical data, and proposes database updates automatically.
+                </div>
               </div>
-            )}
-          </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('rules')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'rules'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Sliders size={14} />
+                <span>Clinical Rule Builder</span>
+                {customRules.length > 0 && (
+                  <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full">
+                    +{customRules.length}
+                  </span>
+                )}
+              </button>
+            </>
+          )}
+
+          {menuMode === 'app_workspace' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('rbac')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'rbac'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Users size={14} />
+                <span>RBAC & Permissions</span>
+              </button>
+            </>
+          )}
+
+
+
+          {menuMode === 'clinical_lab' && (
+            <>
+              {/* Multi-Agent Triage Simulator */}
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('simulation')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'simulation'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Bot size={14} className={activeSubTab === 'simulation' ? 'text-slate-950' : 'text-teal-400'} />
+                <span>Agentic Triage Simulator</span>
+                <span className="bg-indigo-500 text-white text-[8px] font-black px-1 py-0.2 rounded-full uppercase tracking-wider">
+                  Live Trace
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('weather')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'weather'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <CloudSun size={14} />
+                <span>Environment</span>
+              </button>
+            </>
+          )}
+
+          {menuMode === 'app_workspace' && (
+            <>
+              {/* NEW: Key Statistics Screen */}
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('statistics')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'statistics'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <BarChart3 size={14} className={activeSubTab === 'statistics' ? 'text-slate-950' : 'text-teal-400'} />
+                <span>Key Statistics</span>
+              </button>
+
+              {/* NEW: Customer Feedback List */}
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('feedback')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'feedback'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <MessageSquareHeart size={14} className={activeSubTab === 'feedback' ? 'text-slate-950' : 'text-amber-400'} />
+                <span>Customer Feedback</span>
+                {feedbackList.length > 0 && (
+                  <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full">
+                    {feedbackList.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('hospitals')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'hospitals'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Building2 size={14} />
+                <span>Hospital Registry</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('insurance')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'insurance'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <CreditCard size={14} />
+                <span>Insurance Registry</span>
+              </button>
+
+              {/* Grouped Integrations & Devices Dropdown Menu (Dark shade without background blurring) */}
+              <div className="relative" ref={integrationsDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setIntegrationsDropdownOpen(!integrationsDropdownOpen)}
+                  className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                    ['bluetooth', 'wearables'].includes(activeSubTab)
+                      ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                      : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <Cpu size={14} />
+                  <span>Integrations</span>
+                  {['bluetooth', 'wearables'].includes(activeSubTab) && (
+                    <span className="text-[10px] opacity-80 font-normal">
+                      ({activeSubTab === 'bluetooth' ? 'Bluetooth' : 'Wearables'})
+                    </span>
+                  )}
+                  <ChevronDown size={13} className={`transition-transform duration-200 ${integrationsDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {integrationsDropdownOpen && (
+                  <div className="absolute top-full right-0 mt-1.5 w-56 bg-[#070D14] border border-slate-700/90 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] py-1.5 z-50 animate-fadeIn ring-1 ring-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSubTab('bluetooth');
+                        setIntegrationsDropdownOpen(false);
+                      }}
+                      className={`w-full text-left px-3.5 py-2 text-xs font-medium flex items-center gap-2.5 transition-all ${
+                        activeSubTab === 'bluetooth' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <Bluetooth size={14} className="text-teal-400" />
+                      <span>Bluetooth Integrations</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSubTab('wearables');
+                        setIntegrationsDropdownOpen(false);
+                      }}
+                      className={`w-full text-left px-3.5 py-2 text-xs font-medium flex items-center gap-2.5 transition-all ${
+                        activeSubTab === 'wearables' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <Watch size={14} className="text-purple-400" />
+                      <span>Known Wearables</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
+
+      {activeSubTab === 'harvesting' && (
+        <ClinicalKbConsoleView
+          proposals={proposals}
+          onApproveProposal={onApproveProposal!}
+          onDeleteProposal={onDeleteProposal!}
+          onMoveToPendingProposal={onMoveToPendingProposal!}
+          onRefreshProposals={onRefreshProposals!}
+        />
+      )}
+
+      {activeSubTab === 'jarvis_arh' && (
+        <AgenticKnowledgeHarvester
+          onApproveProposal={onApproveProposal!}
+          onDeleteProposal={onDeleteProposal!}
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* 1. RBAC & SCREEN PERMISSIONS CONSOLE */}
@@ -1630,6 +1711,18 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                     >
                       <Plus size={13} />
                       <span>Manual Studio</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRuleBuilderView('unified')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        ruleBuilderView === 'unified'
+                          ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-400 shadow-sm'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Layers size={13} />
+                      <span>Unified Pathways</span>
                     </button>
                   </div>
 
@@ -2398,6 +2491,159 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* 2.5 Unified Pathways View */}
+            {ruleBuilderView === 'unified' && (
+              <div className="bg-white dark:bg-[#14212B] p-6 rounded-3xl border border-[#DDE5E9] dark:border-[#1E2D37] shadow-sm space-y-4 animate-fadeIn">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+                  <div>
+                    <h3 className="text-sm font-black text-[#14212B] dark:text-white flex items-center gap-2">
+                      <Layers className="text-[#0F766E] dark:text-[#2DD4BF]" size={18} />
+                      <span>Unified Triage Pathways (Clinical vs UX Outcome Mapping)</span>
+                    </h3>
+                    <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-0.5">
+                      This view joins the Medical Engine (triage_rules) with the UX/Business Engine (triage_decisions) to show exact cause-and-effect.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                  {filteredRules.map(rule => (
+                    <div key={rule.ruleId} className="flex flex-col md:flex-row gap-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+                      {/* Left side: Clinical Trigger */}
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black uppercase text-slate-500 dark:text-slate-400">Clinical Engine (triage_rules)</span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            rule.severity === 'RED' ? 'bg-red-100 text-red-800' :
+                            rule.severity === 'ORANGE' ? 'bg-amber-100 text-amber-800' :
+                            rule.severity === 'YELLOW' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {rule.severity}
+                          </span>
+                        </div>
+                        <div className="bg-white dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm text-sm">
+                          <div className="font-bold text-slate-800 dark:text-slate-200 mb-1">{rule.conditionId || rule.ruleId}</div>
+                          <div className="text-xs text-slate-600 dark:text-slate-400 mb-2">Patient: {rule.ageBand} • Body: {rule.bodyPart}</div>
+                          <div className="text-xs font-mono bg-slate-100 dark:bg-slate-900 p-2 rounded text-indigo-700 dark:text-indigo-400">
+                            IF {JSON.stringify(rule.when)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Middle: Join */}
+                      <div className="hidden md:flex flex-col items-center justify-center text-slate-300 dark:text-slate-700">
+                        <div className="h-full border-l-2 border-dashed border-slate-300 dark:border-slate-700"></div>
+                        <ArrowRight className="my-2" size={20} />
+                        <div className="h-full border-l-2 border-dashed border-slate-300 dark:border-slate-700"></div>
+                      </div>
+
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black uppercase text-indigo-600 dark:text-indigo-400">UX Engine (triage_decisions)</span>
+                          {editingUxRuleId === rule.ruleId ? (
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => {
+                                  // Simple cancel: close editor. If it was just added and empty, we could remove it, but closing is enough for the mockup.
+                                  setEditingUxRuleId(null);
+                                }} 
+                                className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-bold transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button 
+                                onClick={() => setEditingUxRuleId(null)} 
+                                className="text-[10px] bg-teal-600 text-white px-2 py-0.5 rounded font-bold hover:bg-teal-700 transition-colors"
+                              >
+                                Save UX
+                              </button>
+                            </div>
+                          ) : (
+                            <button 
+                              onClick={() => {
+                                setEditingUxRuleId(rule.ruleId);
+                                if (!uxMappings[rule.ruleId]) {
+                                  setUxMappings(prev => ({
+                                    ...prev,
+                                    [rule.ruleId]: { action: rule.then?.careTierKey || '', meds: '[]', partners: '[]' }
+                                  }));
+                                }
+                              }} 
+                              className="text-[10px] text-teal-600 hover:underline font-bold"
+                            >
+                              {uxMappings[rule.ruleId] ? 'Edit UX' : 'Add Mapping'}
+                            </button>
+                          )}
+                        </div>
+                        <div className={`p-3 rounded-xl border shadow-sm text-sm h-[calc(100%-1.5rem)] ${
+                          uxMappings[rule.ruleId] 
+                            ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-100 dark:border-indigo-900/50' 
+                            : 'bg-slate-50 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800 border-dashed'
+                        }`}>
+                          <div className={`font-bold mb-2 ${uxMappings[rule.ruleId] ? 'text-indigo-900 dark:text-indigo-300' : 'text-slate-500'}`}>
+                            {uxMappings[rule.ruleId] ? `Mapped Outcome for ${rule.severity}` : 'Unmapped (Using Default App Behavior)'}
+                          </div>
+                          
+                          {editingUxRuleId === rule.ruleId ? (
+                            <div className="space-y-2">
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400">Action Plan</label>
+                                <input 
+                                  type="text" 
+                                  value={uxMappings[rule.ruleId]?.action || ''} 
+                                  onChange={e => setUxMappings(prev => ({ ...prev, [rule.ruleId]: { ...prev[rule.ruleId], action: e.target.value } }))}
+                                  className="w-full bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded px-2 py-1 text-xs mt-0.5" 
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400">OTC Medications (JSON Array)</label>
+                                <input 
+                                  type="text" 
+                                  value={uxMappings[rule.ruleId]?.meds || ''} 
+                                  onChange={e => setUxMappings(prev => ({ ...prev, [rule.ruleId]: { ...prev[rule.ruleId], meds: e.target.value } }))}
+                                  className="w-full bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded px-2 py-1 text-xs mt-0.5 font-mono" 
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400">Telemed Partners (JSON Array)</label>
+                                <input 
+                                  type="text" 
+                                  value={uxMappings[rule.ruleId]?.partners || ''} 
+                                  onChange={e => setUxMappings(prev => ({ ...prev, [rule.ruleId]: { ...prev[rule.ruleId], partners: e.target.value } }))}
+                                  className="w-full bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded px-2 py-1 text-xs mt-0.5 font-mono" 
+                                />
+                              </div>
+                            </div>
+                          ) : uxMappings[rule.ruleId] ? (
+                            <div className="space-y-1.5 text-xs">
+                              <div className="flex justify-between border-b border-indigo-100 dark:border-indigo-900/30 pb-1">
+                                <span className="text-indigo-600/70 dark:text-indigo-400/70">Action</span>
+                                <span className="font-bold text-indigo-800 dark:text-indigo-200">{uxMappings[rule.ruleId].action}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-indigo-100 dark:border-indigo-900/30 pb-1">
+                                <span className="text-indigo-600/70 dark:text-indigo-400/70">Medications</span>
+                                <span className="font-bold text-indigo-800 dark:text-indigo-200">{uxMappings[rule.ruleId].meds}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-indigo-600/70 dark:text-indigo-400/70">Partners</span>
+                                <span className="font-bold text-indigo-800 dark:text-indigo-200">{uxMappings[rule.ruleId].partners}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center h-24 opacity-50">
+                              <AlertTriangle size={24} className="mb-2 text-slate-400" />
+                              <span className="text-xs font-bold">No custom UX mapping</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -3203,144 +3449,124 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
       {activeSubTab === 'insurance' && (
         <div className="space-y-6">
           <div className="bg-white dark:bg-[#14212B] p-6 rounded-3xl border border-[#DDE5E9] dark:border-[#1E2D37] shadow-sm space-y-5">
-            <div>
+            <div className="flex items-center justify-between">
               <h2 className="text-base font-black text-[#14212B] dark:text-white flex items-center gap-2">
                 <CreditCard className="text-[#0F766E] dark:text-[#2DD4BF]" size={20} />
-                <span>Singapore Integrated Shield Plans (IP) & eLOG Pre-Authorization</span>
+                <span>Insurance Provider Registry</span>
                 <HelperInfoButton
-                  title="Integrated Shield Plans & eLOG Gateway"
-                  content="Direct integration with Great Eastern, AIA, Prudential, Singlife, and NTUC Income. Simulates real-time Electronic Letter of Guarantee (eLOG) decisions and claim pre-authorizations."
+                  title="Insurance Registry"
+                  content="Manage insurance companies and their listed panel of hospitals. This is used for eLOG simulation and claim pre-authorizations."
                 />
               </h2>
+              <button
+                type="button"
+                onClick={() => setIsAddingInsurance(true)}
+                className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-all shadow flex items-center gap-1.5"
+              >
+                <Plus size={14} />
+                Add Insurance Provider
+              </button>
             </div>
 
-            <form onSubmit={handleSimulateElog} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-5 rounded-2xl bg-[#F6F8FA] dark:bg-[#0F1A20] border border-[#DDE5E9] dark:border-[#1E2D37]">
-              <div>
-                <label className="block text-xs font-bold text-[#14212B] dark:text-white mb-1">Patient</label>
-                <input
-                  type="text"
-                  value={elogPatientName}
-                  onChange={e => setElogPatientName(e.target.value)}
-                  className="w-full bg-white dark:bg-[#14212B] text-xs font-bold px-3 py-2 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] text-[#14212B] dark:text-white"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#14212B] dark:text-white mb-1">Shield Plan Insurer</label>
-                <select
-                  value={elogInsurer}
-                  onChange={e => setElogInsurer(e.target.value)}
-                  className="w-full bg-white dark:bg-[#14212B] text-xs font-bold px-3 py-2 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] text-[#14212B] dark:text-white"
-                >
-                  <option>Great Eastern (GREAT SupremeHealth)</option>
-                  <option>AIA (HealthShield Gold Max)</option>
-                  <option>Prudential (PRUShield Premier)</option>
-                  <option>Singlife (Singlife Shield Plan 1)</option>
-                  <option>NTUC Income (Enhanced IncomeShield)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#14212B] dark:text-white mb-1">Target Hospital</label>
-                <input
-                  type="text"
-                  value={elogHospital}
-                  onChange={e => setElogHospital(e.target.value)}
-                  className="w-full bg-white dark:bg-[#14212B] text-xs px-3 py-2 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] text-[#14212B] dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#14212B] dark:text-white mb-1">Clinical Diagnosis</label>
-                <input
-                  type="text"
-                  value={elogDiagnosis}
-                  onChange={e => setElogDiagnosis(e.target.value)}
-                  className="w-full bg-white dark:bg-[#14212B] text-xs px-3 py-2 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] text-[#14212B] dark:text-white"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#14212B] dark:text-white mb-1">Table of Surgical Procedures (TOSP)</label>
-                <input
-                  type="text"
-                  value={elogTospCode}
-                  onChange={e => setElogTospCode(e.target.value)}
-                  className="w-full bg-white dark:bg-[#14212B] text-xs font-mono px-3 py-2 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] text-[#14212B] dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#14212B] dark:text-white mb-1">Estimated Bill (SGD $)</label>
-                <input
-                  type="number"
-                  value={elogEstBill}
-                  onChange={e => setElogEstBill(parseInt(e.target.value) || 0)}
-                  className="w-full bg-white dark:bg-[#14212B] text-xs font-bold px-3 py-2 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] text-[#14212B] dark:text-white"
-                  required
-                />
-              </div>
-
-              <div className="md:col-span-3 flex justify-end">
-                <button
-                  type="submit"
-                  className="bg-[#0F766E] hover:bg-[#115E59] text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all shadow-sm flex items-center gap-2"
-                >
-                  <Zap size={16} />
-                  <span>Execute eLOG Pre-Authorization Check</span>
-                </button>
-              </div>
-            </form>
-
-            {/* eLOG Result Card */}
-            {elogResult && (
-              <div className="p-6 rounded-3xl bg-emerald-50/80 dark:bg-emerald-950/20 border-2 border-emerald-300 dark:border-emerald-700/60 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 size={22} className="text-emerald-600 dark:text-emerald-400" />
-                    <div>
-                      <h3 className="font-bold text-sm text-emerald-950 dark:text-emerald-100">
-                        Electronic Letter of Guarantee (eLOG) Approved
-                      </h3>
-                      <div className="text-xs text-emerald-700 dark:text-emerald-300 font-mono">
-                        Ref: {elogResult.referenceNo} • Instant Hospital Admission Cleared
-                      </div>
+            {isAddingInsurance && (
+              <div className="p-5 rounded-2xl bg-[#F6F8FA] dark:bg-[#0F1A20] border border-[#DDE5E9] dark:border-[#1E2D37] space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-[#14212B] dark:text-white mb-1">Company Name</label>
+                    <input
+                      type="text"
+                      value={newInsuranceName}
+                      onChange={(e) => setNewInsuranceName(e.target.value)}
+                      placeholder="e.g. Manulife"
+                      className="w-full bg-white dark:bg-[#14212B] border border-[#DDE5E9] dark:border-[#1E2D37] rounded-xl px-3 py-2 text-sm text-[#14212B] dark:text-white focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-[#14212B] dark:text-white mb-1">Select Panel Hospitals</label>
+                    <div className="flex gap-2 flex-wrap max-h-32 overflow-y-auto p-2 bg-white dark:bg-[#14212B] rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37]">
+                      {allFacilities.map(f => (
+                        <label key={f.id} className="flex items-center gap-2 text-xs text-[#14212B] dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={newInsurancePanels.includes(f.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setNewInsurancePanels([...newInsurancePanels, f.id]);
+                              else setNewInsurancePanels(newInsurancePanels.filter(id => id !== f.id));
+                            }}
+                            className="text-teal-600 focus:ring-teal-500 rounded"
+                          />
+                          {f.name}
+                        </label>
+                      ))}
                     </div>
                   </div>
-                  <span className="bg-emerald-600 text-white font-black text-xs px-3 py-1 rounded-full uppercase">
-                    Direct Bill Waiver
-                  </span>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                  <div className="p-3 bg-white dark:bg-[#14212B] rounded-xl border border-emerald-200 dark:border-emerald-800">
-                    <div className="text-[11px] text-slate-500 font-bold uppercase">Approved Guarantee</div>
-                    <div className="text-xl font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
-                      ${elogResult.approvedAmount.toLocaleString()} SGD
-                    </div>
-                    <div className="text-[10px] text-slate-400">Underwritten by {elogInsurer.split(' ')[0]}</div>
-                  </div>
-
-                  <div className="p-3 bg-white dark:bg-[#14212B] rounded-xl border border-emerald-200 dark:border-emerald-800">
-                    <div className="text-[11px] text-slate-500 font-bold uppercase">Estimated Cash Co-Pay</div>
-                    <div className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
-                      ${elogResult.patientCashCopay.toLocaleString()} SGD
-                    </div>
-                    <div className="text-[10px] text-slate-400">5% Co-insurance with Rider Cap</div>
-                  </div>
-
-                  <div className="p-3 bg-white dark:bg-[#14212B] rounded-xl border border-emerald-200 dark:border-emerald-800">
-                    <div className="text-[11px] text-slate-500 font-bold uppercase">MediSave Offset</div>
-                    <div className="text-xl font-black text-teal-600 dark:text-teal-300 mt-0.5">
-                      ${elogResult.mediSaveClaimable.toLocaleString()} SGD
-                    </div>
-                    <div className="text-[10px] text-slate-400">CPFB Daily Inpatient Limit</div>
-                  </div>
+                <div className="flex gap-2 justify-end pt-2 border-t border-[#DDE5E9] dark:border-[#1E2D37]">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingInsurance(false)}
+                    className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!newInsuranceName.trim()) return;
+                      setInsuranceCompanies([...insuranceCompanies, {
+                        id: 'ins-' + Date.now(),
+                        name: newInsuranceName,
+                        panelHospitals: newInsurancePanels
+                      }]);
+                      setIsAddingInsurance(false);
+                      setNewInsuranceName('');
+                      setNewInsurancePanels([]);
+                    }}
+                    className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl shadow"
+                  >
+                    Save Provider
+                  </button>
                 </div>
               </div>
             )}
+
+            <div className="space-y-3">
+              {insuranceCompanies.map(ins => (
+                <div key={ins.id} className="flex flex-col sm:flex-row gap-4 p-4 border border-[#DDE5E9] dark:border-[#1E2D37] rounded-2xl items-start sm:items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-black text-[#14212B] dark:text-white flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-teal-500" />
+                      {ins.name}
+                    </h3>
+                    <p className="text-xs text-[#52616B] dark:text-[#94A3B8] mt-1">
+                      {ins.panelHospitals.length} panel hospitals configured
+                    </p>
+                  </div>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {ins.panelHospitals.slice(0, 3).map(fId => {
+                      const f = allFacilities.find(fac => fac.id === fId);
+                      return f ? (
+                        <span key={fId} className="px-2 py-1 text-[10px] font-bold bg-[#F0FDF4] text-teal-800 border border-teal-200 rounded-md">
+                          {f.name}
+                        </span>
+                      ) : null;
+                    })}
+                    {ins.panelHospitals.length > 3 && (
+                      <span className="px-2 py-1 text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 rounded-md">
+                        +{ins.panelHospitals.length - 3} more
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setInsuranceCompanies(insuranceCompanies.filter(c => c.id !== ins.id))}
+                    className="p-1.5 text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

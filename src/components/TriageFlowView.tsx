@@ -1,30 +1,8 @@
-import React, { useState } from 'react';
-import { 
-  Send, 
-  Mic, 
-  Camera, 
-  AlertOctagon, 
-  ArrowRight, 
-  RotateCcw, 
-  Sparkles,
-  Info,
-  CheckCircle2,
-  Activity,
-  ArrowLeft,
-  Wind,
-  Thermometer,
-  Bandage,
-  Eye,
-  Zap,
-  Brain,
-  MoreHorizontal,
-  RotateCw,
-  Layers
-} from 'lucide-react';
-import type { Person, Ailment, Language, TriageResult, QuestionStep } from '../types';
-import { AILMENTS, detectEmergencyKeywords, getQuestionTree, runTriage, getAgeDisplay } from '../engine/triageEngine';
-import { runAgenticTriage } from '../engine/agenticPipeline';
-import { getGreeting, getSymptomPrompt } from '../engine/grandmaVoice';
+import React, { useState, useEffect, useRef } from 'react';
+import { Activity, Camera, Mic, Send, AlertOctagon, CheckCircle2, ArrowRight, Loader2, Sparkles, Thermometer, Wind, Eye, Brain, Zap, Bandage } from 'lucide-react';
+import type { Person, Language, TriageResult, Ailment, QuestionStep } from '../types';
+import { getQuestionTree, runTriage } from '../engine/triageEngine';
+import { runRuleBasedTriage, getQuestionTree as getRuleBasedQuestionTree } from '../engine/ruleBasedEngine';
 import { RealVoiceRecorder } from './RealVoiceRecorder';
 import { RealPhotoUploader } from './RealPhotoUploader';
 
@@ -49,702 +27,528 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
   onRemoveAilment,
   triageMode = 'rule-based',
 }) => {
-  // Intake mode
-  const [intakeMode, setIntakeMode] = useState<'text' | 'voice' | 'photo' | 'chips'>('text');
+  const [step, setStep] = useState<'intake' | 'questions' | 'processing'>('intake');
+  const [intakeMode, setIntakeMode] = useState<'chips' | 'text' | 'voice' | 'photo'>('chips');
+  
+  // State for different modalities
   const [textInput, setTextInput] = useState('');
-  const [selectedAilment, setSelectedAilment] = useState<Ailment | null>(null);
-  const [removedAilment, setRemovedAilment] = useState(false);
-
-  // Photo state
-  const [photoDescriptors, setPhotoDescriptors] = useState<string[]>([]);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-
-  // Question Tree state
-  const [inQuestionTree, setInQuestionTree] = useState(false);
+  const [photoDescriptors, setPhotoDescriptors] = useState<string[]>([]);
+  
+  const [ailments, setAilments] = useState<Ailment[]>([]);
+  const [isLoadingAilments, setIsLoadingAilments] = useState(true);
+  const [selectedAilment, setSelectedAilment] = useState<Ailment | null>(null);
+  
   const [questions, setQuestions] = useState<QuestionStep[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [isFetchingQuestions, setIsFetchingQuestions] = useState(false);
+  const [answerInput, setAnswerInput] = useState<string>('');
 
-  // Real-time emergency detection warning
-  const keywordDetection = detectEmergencyKeywords(textInput, language);
+  const [emergencyKeywords, setEmergencyKeywords] = useState<string[]>([]);
+  const [emergencyWarning, setEmergencyWarning] = useState<string | null>(null);
 
-  // Quick scenario triggers for easy testing
-  const handleQuickScenarioLucas = () => {
-    setIntakeMode('text');
-    setTextInput(
-      language === 'zh'
-        ? '宝宝发烧38.8度，精神有点烦躁，流鼻涕，不肯喝奶'
-        : 'Baby Lucas has fever 38.8°C, irritable, mild runny nose, and refusing feeding'
-    );
-    setSelectedAilment(AILMENTS.find(a => a.code === 'fever') || null);
-  };
+  // Fetch ailments and keywords on mount
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoadingAilments(true);
+      try {
+        const [ailmentsRes, keywordsRes] = await Promise.all([
+          fetch('/api/db/ailments'),
+          fetch(`/api/db/keywords?lang=${language}`)
+        ]);
+        
+        if (ailmentsRes.ok) {
+          const data = await ailmentsRes.json();
+          setAilments(data);
+        }
+        
+        if (keywordsRes.ok) {
+          const data = await keywordsRes.json();
+          setEmergencyKeywords(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch initial triage data", err);
+      } finally {
+        setIsLoadingAilments(false);
+      }
+    };
+    loadData();
+  }, [language]);
 
-  const handleQuickScenarioAhBoonStroke = () => {
-    setIntakeMode('text');
-    setTextInput(
-      language === 'zh'
-        ? '爷爷突然说话大舌头含糊不清，右手抬不起来，嘴角有些歪斜'
-        : 'Grandpa Ah Boon suddenly has slurred speech, right arm is weak, and mouth is drooping'
-    );
-    setSelectedAilment(AILMENTS.find(a => a.code === 'confusion_neuro') || null);
-  };
-
-  const handleQuickScenarioPhotoEye = () => {
-    setIntakeMode('photo');
-    setSelectedAilment(AILMENTS.find(a => a.code === 'eye_symptoms') || null);
-    setTextInput('Red, irritated eye since this morning, tearing and mild itch');
-  };
-
-  // NLP matcher to avoid falling back to Fever all the time
-  const detectAilmentFromText = (text: string, current: Ailment | null): Ailment => {
-    const lower = text.toLowerCase();
+  // Real-time emergency keyword detection
+  useEffect(() => {
+    if (!textInput || emergencyKeywords.length === 0) {
+      setEmergencyWarning(null);
+      return;
+    }
     
-    for (const a of AILMENTS) {
+    const lowerInput = textInput.toLowerCase();
+    
+    // Check for crisis keywords first
+    const crisisKeywords = ['suicide', 'kill myself', 'end my life', 'self harm', 'hurt myself', 'want to die', '自杀', '想死', '自残', 'bunuh diri', 'mahu mati'];
+    const hasCrisis = crisisKeywords.some(cw => lowerInput.includes(cw));
+    if (hasCrisis) {
+      onOpenCrisis();
+      setEmergencyWarning('Red Flag Detected: Mental Health Crisis. Please seek immediate support.');
+      return;
+    }
+
+    const detected = emergencyKeywords.find(kw => lowerInput.includes(kw.toLowerCase()));
+    
+    if (detected) {
+      setEmergencyWarning(`Red Flag Detected: "${detected}". If this is a life-threatening emergency, please seek immediate medical attention or call 995.`);
+    } else {
+      setEmergencyWarning(null);
+    }
+  }, [textInput, emergencyKeywords]);
+
+  // NLP matcher to guess ailment from text/voice
+  const detectAilmentFromText = (text: string): Ailment => {
+    const lower = text.toLowerCase();
+    for (const a of ailments) {
       if (lower.includes(a.code.replace('_', ' '))) return a;
       if (lower.includes(a.name.toLowerCase())) return a;
     }
+    if (lower.includes('cut') || lower.includes('bleed') || lower.includes('fall')) return ailments.find(a => a.code === 'injury_wound') || ailments[0];
+    if (lower.includes('eye') || lower.includes('vision')) return ailments.find(a => a.code === 'eye_symptoms') || ailments[0];
+    return ailments[0]; // fallback
+  };
+
+  // AbortController for cancelling triage
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleCancelTriage = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setStep('initial');
+    setAnswerInput('');
+  };
+
+  const startAssessment = async (detectedAilment: Ailment) => {
+    if (emergencyWarning) {
+      setStep('processing');
+      abortControllerRef.current = new AbortController();
+      let result;
+      if (triageMode === 'agentic') {
+        result = await runTriage({ 
+          ailment: detectedAilment, 
+          answers: { emergency_bypass: true }, 
+          person,
+          text: textInput,
+          imageDescriptors: photoDescriptors,
+          abortSignal: abortControllerRef.current.signal
+        });
+      } else {
+        result = runRuleBasedTriage({
+          ailmentCode: detectedAilment.code,
+          answers: { emergency_bypass: true },
+          person,
+          text: textInput,
+          imageDescriptors: photoDescriptors,
+          language
+        });
+      }
+      onTriageComplete(result, { emergency_bypass: true }, detectedAilment);
+      return;
+    }
+
+    setSelectedAilment(detectedAilment);
+    setStep('questions');
+    setIsFetchingQuestions(true);
     
-    if (lower.includes('breath') || lower.includes('breathing')) return AILMENTS.find(a => a.code === 'breathing_difficulty') || AILMENTS[0];
-    if (lower.includes('stomach') || lower.includes('tummy') || lower.includes('belly')) return AILMENTS.find(a => a.code === 'abdominal_pain') || AILMENTS[0];
-    if (lower.includes('throw up') || lower.includes('puke')) return AILMENTS.find(a => a.code === 'vomiting') || AILMENTS[0];
-    if (lower.includes('poop') || lower.includes('runny')) return AILMENTS.find(a => a.code === 'diarrhea') || AILMENTS[0];
-    if (lower.includes('cut') || lower.includes('bleed') || lower.includes('fall') || lower.includes('hurt')) return AILMENTS.find(a => a.code === 'injury_wound') || AILMENTS[0];
-    if (lower.includes('pee') || lower.includes('urine')) return AILMENTS.find(a => a.code === 'uti') || AILMENTS[0];
-    if (lower.includes('burn') || lower.includes('scald')) return AILMENTS.find(a => a.code === 'minor_burn') || AILMENTS[0];
-    if (lower.includes('eye') || lower.includes('vision')) return AILMENTS.find(a => a.code === 'eye_symptoms') || AILMENTS[0];
-
-    return current || AILMENTS[0]; // fallback to fever
-  };
-
-  // Start question tree for an ailment
-  const startAssessment = (ailment: Ailment, initialAnswers: Record<string, any> = {}) => {
-    setSelectedAilment(ailment);
-
-    // Emergency keywords check
-    if (keywordDetection.triggered) {
-      if (keywordDetection.isCrisis) {
-        onOpenCrisis();
-      }
-      if (triageMode === 'agentic') {
-        runAgenticTriage(textInput, initialAnswers, person, language).then(finalResult => {
-          onTriageComplete(finalResult, initialAnswers, ailment);
-        });
-        return;
-      }
-      const immediateResult = runTriage({
-        text: textInput,
-        ailmentCode: ailment.code,
-        answers: initialAnswers,
-        person,
-        language,
-        imageDescriptors: photoDescriptors,
-      });
-      onTriageComplete(immediateResult, initialAnswers, ailment);
-      return;
-    }
-
-    const tree = getQuestionTree(ailment.code, person);
-    if (tree.length === 0) {
-      if (triageMode === 'agentic') {
-        runAgenticTriage(textInput, initialAnswers, person, language).then(finalResult => {
-          onTriageComplete(finalResult, initialAnswers, ailment);
-        });
-      } else {
-        const res = runTriage({
-          text: textInput,
-          ailmentCode: ailment.code,
-          answers: initialAnswers,
-          person,
-          language,
-          imageDescriptors: photoDescriptors,
-        });
-        onTriageComplete(res, initialAnswers, ailment);
-      }
-      return;
-    }
-
-    setQuestions(tree);
-    setCurrentQuestionIndex(0);
-    setAnswers(initialAnswers);
-    setInQuestionTree(true);
-  };
-
-  // Answer question step
-  const handleAnswerQuestion = (val: any) => {
-    const currentQ = questions[currentQuestionIndex];
-    const updatedAnswers = { ...answers, [currentQ.id]: val };
-    setAnswers(updatedAnswers);
-
-    // Record red flags if any, but continue assessment.
-    const isRedFlag = currentQ.redFlagIf?.some(flagVal => {
-      if (typeof flagVal === 'boolean') return Boolean(val) === flagVal;
-      return String(val).toLowerCase() === String(flagVal).toLowerCase();
-    });
-
-
-    if (currentQuestionIndex + 1 < questions.length) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
+    let fetchedQuestions: QuestionStep[] = [];
+    if (triageMode === 'agentic') {
+      fetchedQuestions = await getQuestionTree(detectedAilment.code, person);
     } else {
+      fetchedQuestions = getRuleBasedQuestionTree(detectedAilment.code, person);
+    }
+    
+    const mockQuestions: QuestionStep[] = fetchedQuestions.length ? fetchedQuestions : [
+      { id: 'q1', text: 'How long have you had this symptom?', answerType: 'choice', options: ['Less than a day', '1-3 days', 'More than 3 days'] },
+      { id: 'q2', text: 'Are you experiencing any severe pain?', answerType: 'yes_no' }
+    ];
+    
+    setQuestions(mockQuestions);
+    setIsFetchingQuestions(false);
+  };
+
+  const handleAnswer = async (answer: any) => {
+    const currentQ = questions[currentQuestionIndex];
+    const newAnswers = { ...answers, [currentQ.id]: answer };
+    setAnswers(newAnswers);
+    setAnswerInput(''); // Reset text box
+
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex(prev => prev + 1);
+    } else {
+      // Finished questions, run triage
+      setStep('processing');
+      abortControllerRef.current = new AbortController();
+      
+      let result;
       if (triageMode === 'agentic') {
-        runAgenticTriage(textInput, updatedAnswers, person, language).then(finalResult => {
-          setInQuestionTree(false);
-          onTriageComplete(finalResult, updatedAnswers, selectedAilment || undefined);
+        result = await runTriage({ 
+          ailment: selectedAilment, 
+          answers: newAnswers, 
+          person,
+          text: textInput,
+          imageDescriptors: photoDescriptors,
+          abortSignal: abortControllerRef.current.signal
         });
       } else {
-        const finalResult = runTriage({
-          text: textInput,
+        result = runRuleBasedTriage({
           ailmentCode: selectedAilment?.code,
-          answers: updatedAnswers,
+          answers: newAnswers,
           person,
-          language,
+          text: textInput,
           imageDescriptors: photoDescriptors,
+          language
         });
-        setInQuestionTree(false);
-        onTriageComplete(finalResult, updatedAnswers, selectedAilment || undefined);
       }
+      
+      onTriageComplete(result, newAnswers, selectedAilment!);
     }
   };
 
-  return (
-    <div className="max-w-4xl mx-auto space-y-5 animate-fadeIn pb-12">
-      {/* Wrong-Subject Banner & Patient Lock (SRS TRI-16) */}
-      <div className="bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-2xl p-3 sm:p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
-        <div className="flex items-center space-x-2.5 sm:space-x-3">
-          {onChangeSubject && (
-            <button
-              onClick={onChangeSubject}
-              className="p-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-sm shrink-0"
-              title="Change family member being assessed"
-            >
-              <ArrowLeft size={16} />
-            </button>
-          )}
-          <div className="text-2xl sm:text-3xl shrink-0">{person.avatar || '👤'}</div>
-          <div>
-            <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-              <span className="text-[10px] sm:text-xs font-extrabold uppercase tracking-wider text-teal-800 bg-teal-100/70 px-1.5 py-0.5 rounded-md">
-                {language === 'zh' ? '当前受评估人' : 'Assessing'}
-              </span>
-              <span className="font-bold text-slate-900 text-sm sm:text-base">{person.name}</span>
-              <span className="text-xs text-slate-500 font-medium">
-                ({getAgeDisplay(person.dob, language)} • {person.relationshipLabel})
-              </span>
-            </div>
-            <div className="text-[11px] sm:text-xs text-slate-600 mt-0.5">
-              {person.medicalProfile.allergies.length > 0 && (
-                <span className="text-rose-700 font-semibold mr-2">
-                  ⚠️ Allergies: {person.medicalProfile.allergies.map(a => a.name).join(', ')}
-                </span>
-              )}
-              {person.medicalProfile.medications.length > 0 && (
-                <span className="text-slate-600">
-                  💊 Active Meds: {person.medicalProfile.medications.map(m => m.name).join(', ')}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+  const t = {
+    en: {
+      analyzing: "Analyzing Symptoms",
+      analyzingDesc: triageMode === 'agentic' ? "Our Agentic AI is consulting clinical rules..." : "Evaluating against clinical rules...",
+      generating: triageMode === 'agentic' ? "Generating tailored questions..." : "Loading assessment questions...",
+      questionOf: (curr: number, tot: number) => `Question ${curr} of ${tot}`,
+      yes: "Yes",
+      no: "No",
+      continue: "Continue",
+      howCanHelp: (name: string) => `How can we help ${name}?`,
+      selectInput: "Select an input method below to describe the symptoms.",
+      typePlaceholder: "Type your answer...",
+      numberPlaceholder: "Enter number...",
+      categories: "Categories",
+      typeText: "Type Text",
+      microphone: "Microphone",
+      cameraPhoto: "Camera / Photo",
+      emergencyInd: "Potential Emergency Indicator",
+      callSos: "Call SOS",
+      loadingAilments: "Loading clinical database...",
+      startTriage: triageMode === 'agentic' ? "Start Agentic Triage" : "Start Triage",
+      describeSymptomsPlaceholder: "e.g. He fell down and has a cut on his knee...",
+      startAnalysis: "Start Analysis",
+      orChooseCommon: "Or choose a common ailment below:",
+      analyzeText: "Analyze Text",
+      assessVoice: "Assess Voice Transcript",
+      assessImage: "Assess Image Cues",
+    },
+    ms: {
+      analyzing: "Menganalisis Gejala",
+      analyzingDesc: triageMode === 'agentic' ? "AI Ejen kami sedang merujuk peraturan klinikal..." : "Menilai dengan peraturan klinikal...",
+      generating: triageMode === 'agentic' ? "Menjana soalan khusus..." : "Memuatkan soalan...",
+      questionOf: (curr: number, tot: number) => `Soalan ${curr} daripada ${tot}`,
+      yes: "Ya",
+      no: "Tidak",
+      continue: "Teruskan",
+      howCanHelp: (name: string) => `Bagaimana kami boleh bantu ${name}?`,
+      selectInput: "Pilih kaedah input di bawah untuk menerangkan gejala.",
+      typePlaceholder: "Taip jawapan anda...",
+      numberPlaceholder: "Masukkan nombor...",
+      categories: "Kategori",
+      typeText: "Taip Teks",
+      microphone: "Mikrofon",
+      cameraPhoto: "Kamera / Foto",
+      emergencyInd: "Penunjuk Kecemasan Potensi",
+      callSos: "Panggil SOS",
+      loadingAilments: "Memuatkan pangkalan data klinikal...",
+      startTriage: triageMode === 'agentic' ? "Mula Triage Ejen" : "Mula Triage",
+      describeSymptomsPlaceholder: "cth. Dia jatuh dan luka di lutut...",
+      startAnalysis: "Mula Analisis",
+      orChooseCommon: "Atau pilih penyakit biasa di bawah:",
+      analyzeText: "Analisis Teks",
+      assessVoice: "Nilai Transkrip Suara",
+      assessImage: "Nilai Petunjuk Imej",
+    },
+    zh: {
+      analyzing: "正在分析症状",
+      analyzingDesc: triageMode === 'agentic' ? "我们的智能AI正在查阅临床规则..." : "正在查阅临床规则...",
+      generating: triageMode === 'agentic' ? "正在生成定制问题..." : "正在加载评估问题...",
+      questionOf: (curr: number, tot: number) => `第 ${curr} 个问题，共 ${tot} 个`,
+      yes: "是",
+      no: "否",
+      continue: "继续",
+      howCanHelp: (name: string) => `我们可以如何帮助 ${name}？`,
+      selectInput: "请在下方选择输入方法以描述症状。",
+      typePlaceholder: "输入您的答案...",
+      numberPlaceholder: "输入数字...",
+      categories: "类别",
+      typeText: "文本描述",
+      microphone: "麦克风",
+      cameraPhoto: "相机 / 照片",
+      emergencyInd: "潜在紧急情况指示",
+      callSos: "呼叫SOS",
+      loadingAilments: "正在加载临床数据库...",
+      startTriage: triageMode === 'agentic' ? "开始智能分诊" : "开始分诊",
+      describeSymptomsPlaceholder: "例如：他摔倒了，膝盖有伤口...",
+      startAnalysis: "开始分析",
+      orChooseCommon: "或在下方选择常见病症：",
+      analyzeText: "分析文本",
+      assessVoice: "评估语音记录",
+      assessImage: "评估图像线索",
+    }
+  }[language];
 
-        {/* Persistent Emergency Button */}
-        <button
-          onClick={onOpenSos}
-          className="self-start sm:self-auto flex items-center space-x-1.5 text-xs font-bold text-rose-700 hover:text-rose-900 bg-rose-100 hover:bg-rose-200 px-3 py-1.5 rounded-xl transition-all"
+  const grandmaLoadingMessages = [
+    "Granny is checking the latest MOH medical guidelines...",
+    "Reviewing your local Dengue and Haze maps...",
+    "Asking the virtual doctor to double-check the symptoms...",
+    "Putting on my reading glasses to read the medication safety rules...",
+    "Hold on dear, Granny is finalizing the best advice for you...",
+    "Making sure we haven't missed any red flags..."
+  ];
+  
+  const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
+  useEffect(() => {
+    if (step === 'processing') {
+      const interval = setInterval(() => {
+        setLoadingMsgIdx((prev) => (prev + 1) % grandmaLoadingMessages.length);
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [step]);
+
+  if (step === 'processing') {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 bg-white/60 backdrop-blur-xl rounded-3xl shadow-sm border border-white/40 min-h-[400px]">
+        <div className="relative mb-6">
+          <div className="absolute inset-0 bg-blue-400 rounded-full blur-xl opacity-20 animate-pulse"></div>
+          <Activity className="w-16 h-16 text-blue-600 animate-bounce relative z-10" />
+        </div>
+        <h3 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">{t.analyzing}</h3>
+        <p className="text-gray-500 animate-pulse text-center max-w-md">{grandmaLoadingMessages[loadingMsgIdx]}</p>
+        <button 
+          onClick={handleCancelTriage}
+          className="mt-8 px-6 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full text-sm font-semibold transition-all border border-slate-200"
         >
-          <AlertOctagon size={14} />
-          <span>{language === 'zh' ? '此为紧急情况' : 'Emergency Assistance'}</span>
+          Stop Analysis
         </button>
       </div>
+    );
+  }
 
-      {/* Ongoing Ailment Banner with Remove Button */}
-      {person.activeComplaint && !removedAilment && (
-        <div className="bg-amber-500/10 border-2 border-amber-500/30 rounded-3xl p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm animate-fadeIn">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-600 dark:text-amber-400 text-xl shrink-0">
-              🤒
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold uppercase text-[10px] tracking-wider text-amber-800 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md">
-                  Active Ongoing Ailment on File
-                </span>
-              </div>
-              <p className="font-bold text-slate-900 dark:text-slate-100 mt-0.5">
-                {person.activeComplaint}
-              </p>
-            </div>
-          </div>
+  if (step === 'questions') {
+    if (isFetchingQuestions) {
+      return (
+        <div className="flex flex-col items-center justify-center p-12 min-h-[300px]">
+          <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
+          <p className="text-gray-500 font-medium">{t.generating}</p>
+        </div>
+      );
+    }
 
+    const q = questions[currentQuestionIndex];
+    if (!q) return null;
+
+    return (
+      <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-sm border border-white/40 max-w-2xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4">
+        <div className="flex items-center justify-between mb-6">
+          <span className="text-sm font-bold text-blue-600 bg-blue-50 px-4 py-1.5 rounded-full">
+            {t.questionOf(currentQuestionIndex + 1, questions.length)}
+          </span>
+          <span className="text-sm font-medium text-gray-400">{selectedAilment?.name}</span>
+        </div>
+        
+        <h3 className="text-2xl font-bold text-gray-900 leading-snug">{q.text}</h3>
+
+        <div className="space-y-3 mt-8">
+          {q.answerType === 'yes_no' && (
+            <div className="grid grid-cols-2 gap-4">
+              <button onClick={() => handleAnswer('yes')} className="py-4 px-6 rounded-2xl border-2 border-gray-100 hover:border-blue-500 hover:bg-blue-50 font-bold text-gray-700 transition-all">{t.yes}</button>
+              <button onClick={() => handleAnswer('no')} className="py-4 px-6 rounded-2xl border-2 border-gray-100 hover:border-gray-400 hover:bg-gray-50 font-bold text-gray-700 transition-all">{t.no}</button>
+            </div>
+          )}
+          {q.answerType === 'choice' && q.options?.map((opt, i) => (
+            <button key={i} onClick={() => handleAnswer(opt)} className="w-full text-left py-4 px-6 rounded-2xl border-2 border-gray-100 hover:border-blue-500 hover:bg-blue-50 font-bold text-gray-700 transition-all">
+              {opt}
+            </button>
+          ))}
+          {(q.answerType === 'number' || q.answerType === 'text') && (
+            <div className="flex flex-col gap-3">
+              <input
+                type={q.answerType === 'number' ? 'number' : 'text'}
+                value={answerInput}
+                onChange={(e) => setAnswerInput(e.target.value)}
+                placeholder={q.answerType === 'number' ? t.numberPlaceholder : t.typePlaceholder}
+                className="w-full py-4 px-6 rounded-2xl border-2 border-gray-200 focus:border-blue-500 focus:ring-0 font-bold text-gray-900 transition-all bg-white shadow-inner text-lg"
+                min={q.min}
+                max={q.max}
+              />
+              <button 
+                disabled={!answerInput.trim()}
+                onClick={() => handleAnswer(answerInput)} 
+                className="w-full py-4 px-6 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-bold text-white transition-all shadow-md"
+              >
+                {t.continue}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // INTAKE STEP (Ailments, Text, Voice, Photo)
+  return (
+    <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in duration-500">
+      
+      {/* Premium Glass Header */}
+      <div className="bg-white/60 backdrop-blur-xl border border-white/40 rounded-3xl p-6 shadow-sm flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-extrabold text-gray-900">{t.howCanHelp(person.name)}</h2>
+          <p className="text-gray-500 text-sm mt-1">{t.selectInput}</p>
+        </div>
+        <div className="text-4xl bg-blue-50 w-16 h-16 rounded-2xl flex items-center justify-center border border-blue-100">
+          {person.avatar || '👤'}
+        </div>
+      </div>
+
+      {/* Input Mode Selector */}
+      <div className="flex p-1.5 bg-gray-100/80 backdrop-blur-md rounded-2xl overflow-hidden shadow-inner">
+        {[
+          { id: 'chips', icon: <Activity size={16} />, label: t.categories },
+          { id: 'text', icon: <Send size={16} />, label: t.typeText },
+          { id: 'voice', icon: <Mic size={16} />, label: t.microphone },
+          { id: 'photo', icon: <Camera size={16} />, label: t.cameraPhoto }
+        ].map(mode => (
           <button
-            onClick={() => {
-              setRemovedAilment(true);
-              onRemoveAilment?.(person.id);
-            }}
-            className="px-4 py-2 rounded-full bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md shadow-amber-900/20 active:scale-95 transition-all flex items-center gap-1.5 shrink-0"
-            title="Mark this ailment as resolved and remove from patient profile"
+            key={mode.id}
+            onClick={() => setIntakeMode(mode.id as any)}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all ${
+              intakeMode === mode.id 
+                ? 'bg-white text-blue-600 shadow-sm border border-gray-200/50 scale-[1.02]' 
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'
+            }`}
           >
-            <CheckCircle2 size={15} />
-            <span>Remove Ongoing Ailment</span>
+            {mode.icon}
+            <span className="hidden sm:inline">{mode.label}</span>
           </button>
-        </div>
-      )}
+        ))}
+      </div>
 
-      {removedAilment && (
-        <div className="p-4 rounded-3xl bg-emerald-500/15 border-2 border-emerald-500/30 text-emerald-800 dark:text-emerald-300 font-bold text-xs sm:text-sm flex items-center gap-2 animate-fadeIn">
-          <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-          <span>Ongoing ailment for {person.name} has been marked as resolved and removed.</span>
-        </div>
-      )}
-
-      {/* Main Card */}
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5 sm:p-7 space-y-6">
-        {/* Grandma Warm Greeting & Prompt (PER-01) */}
-        <div className="flex items-start space-x-3.5 bg-rose-50/70 border border-rose-100 rounded-2xl p-4">
-          <div className="text-2xl mt-0.5">👵🏼</div>
-          <div className="space-y-1">
-            <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-              {getGreeting(person, language)}
-            </h3>
-            <p className="text-xs sm:text-sm text-slate-600">
-              {getSymptomPrompt(person, language)}
-            </p>
-          </div>
-        </div>
-
-        {/* If in interactive question tree */}
-        {inQuestionTree && questions.length > 0 ? (
-          <div className="space-y-6 bg-slate-50 border border-slate-200 rounded-2xl p-5 animate-fadeIn">
-            {/* Tree Progress */}
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <div className="flex items-center space-x-2">
-                <span className="w-6 h-6 rounded-full bg-teal-600 text-white font-bold text-xs flex items-center justify-center">
-                  {currentQuestionIndex + 1}
-                </span>
-                <span className="text-xs font-semibold text-slate-600">
-                  Question {currentQuestionIndex + 1} of {questions.length} • {selectedAilment?.name}
-                </span>
-              </div>
-              <button
-                onClick={() => setInQuestionTree(false)}
-                className="text-xs text-slate-400 hover:text-slate-700 flex items-center space-x-1"
-              >
-                <RotateCcw size={12} />
-                <span>Reset questions</span>
-              </button>
+      {/* Main Input Area */}
+      <div className="bg-white/80 backdrop-blur-xl border border-white/60 rounded-3xl p-6 shadow-sm min-h-[300px]">
+        
+        {/* Emergency Warning Banner */}
+        {emergencyWarning && (
+          <div className="mb-4 animate-in fade-in p-4 bg-red-50 border-l-4 border-red-500 rounded-r-xl flex items-start gap-3">
+            <AlertOctagon className="text-red-500 mt-0.5 shrink-0" size={20} />
+            <div className="flex-1">
+              <h4 className="text-sm font-bold text-red-800">{t.emergencyInd}</h4>
+              <p className="text-xs text-red-700 mt-1">{emergencyWarning}</p>
             </div>
-
-            {/* Current Question Display */}
-            {(() => {
-              const q = questions[currentQuestionIndex];
-              const text =
-                language === 'zh' && q.textZh
-                  ? q.textZh
-                  : language === 'ms' && q.textMs
-                  ? q.textMs
-                  : q.text;
-
-              return (
-                <div key={q.id} className="space-y-4 py-2">
-                  <h4 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
-                    {text}
-                  </h4>
-                  {q.helpText && (
-                    <p className="text-xs text-slate-500 italic flex items-center space-x-1">
-                      <Info size={13} />
-                      <span>{q.helpText}</span>
-                    </p>
-                  )}
-
-                  {/* Yes / No Question */}
-                  {q.answerType === 'yes_no' && (
-                    <div className="grid grid-cols-2 gap-3 pt-2">
-                      <button
-                        onClick={() => handleAnswerQuestion('yes')}
-                        className="p-4 rounded-xl border-2 border-slate-200 hover:border-teal-500 hover:bg-teal-50 font-bold text-sm sm:text-base text-slate-800 transition-all flex items-center justify-center space-x-2"
-                      >
-                        <CheckCircle2 size={18} className="text-teal-600" />
-                        <span>{language === 'zh' ? '是 (Yes)' : language === 'ms' ? 'Ya (Yes)' : 'Yes'}</span>
-                      </button>
-                      <button
-                        onClick={() => handleAnswerQuestion('no')}
-                        className="p-4 rounded-xl border-2 border-slate-200 hover:border-slate-400 hover:bg-slate-100 font-bold text-sm sm:text-base text-slate-800 transition-all flex items-center justify-center space-x-2"
-                      >
-                        <span>{language === 'zh' ? '否 (No)' : language === 'ms' ? 'Tidak (No)' : 'No'}</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Multiple Choice Question */}
-                  {q.answerType === 'choice' && q.options && (
-                    <div className="space-y-2 pt-2">
-                      {q.options.map((opt, optIdx) => {
-                        const optLabel =
-                          language === 'zh' && q.optionsZh && q.optionsZh[optIdx]
-                            ? q.optionsZh[optIdx]
-                            : language === 'ms' && q.optionsMs && q.optionsMs[optIdx]
-                            ? q.optionsMs[optIdx]
-                            : opt;
-
-                        return (
-                          <button
-                            key={optIdx}
-                            onClick={() => handleAnswerQuestion(opt)}
-                            className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-teal-500 hover:bg-teal-50/70 text-sm font-semibold text-slate-800 transition-all flex items-center justify-between"
-                          >
-                            <span>{optLabel}</span>
-                            <ArrowRight size={15} className="text-slate-400" />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Number Input (e.g. Temperature °C) */}
-                  {q.answerType === 'number' && (
-                    <div className="space-y-3 pt-2">
-                      <div className="flex items-center space-x-3">
-                        <input
-                          type="number"
-                          step={q.step || 0.1}
-                          min={q.min || 0}
-                          max={q.max || 100}
-                          defaultValue={0}
-                          id={`number-input-${q.id}`}
-                          className="text-2xl font-bold font-mono px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-teal-500 w-36 text-center"
-                        />
-                        <span className="text-lg font-bold text-slate-600">{q.unit || ''}</span>
-                        <button
-                          onClick={() => {
-                            const val = (document.getElementById(`number-input-${q.id}`) as HTMLInputElement)?.value;
-                            handleAnswerQuestion(val ? Number(val) : 0);
-                          }}
-                          className="px-5 py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-md transition-all flex items-center space-x-1.5"
-                        >
-                          <span>Confirm</span>
-                          <ArrowRight size={15} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
+            <button onClick={onOpenSos} className="shrink-0 px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold rounded-lg transition-colors">
+              {t.callSos}
+            </button>
           </div>
-        ) : (
-          /* Intake Input Controls */
-          <div className="space-y-5">
-            {/* Input Mode Selector Tabs */}
-            <div className="flex items-center space-x-1 sm:space-x-2 border-b border-slate-200 overflow-x-auto no-scrollbar text-xs font-bold text-slate-600 pb-0.5">
-              <button
-                onClick={() => setIntakeMode('text')}
-                className={`pb-2 px-2.5 sm:px-3.5 flex items-center space-x-1.5 border-b-2 whitespace-nowrap shrink-0 transition-all ${
-                  intakeMode === 'text' ? 'border-teal-600 text-teal-700' : 'border-transparent hover:text-slate-900'
-                }`}
-              >
-                <Send size={14} />
-                <span>{language === 'zh' ? '打字描述' : 'Describe in Words'}</span>
-              </button>
-              <button
-                onClick={() => setIntakeMode('voice')}
-                className={`pb-2 px-2.5 sm:px-3.5 flex items-center space-x-1.5 border-b-2 whitespace-nowrap shrink-0 transition-all ${
-                  intakeMode === 'voice' ? 'border-teal-600 text-teal-700' : 'border-transparent hover:text-slate-900'
-                }`}
-              >
-                <Mic size={14} />
-                <span>{language === 'zh' ? '语音麦克风' : 'Live Microphone'}</span>
-              </button>
-              <button
-                onClick={() => setIntakeMode('photo')}
-                className={`pb-2 px-2.5 sm:px-3.5 flex items-center space-x-1.5 border-b-2 whitespace-nowrap shrink-0 transition-all ${
-                  intakeMode === 'photo' ? 'border-teal-600 text-teal-700' : 'border-transparent hover:text-slate-900'
-                }`}
-              >
-                <Camera size={14} />
-                <span>{language === 'zh' ? '拍照 / 伤口' : 'Photo / Camera'}</span>
-              </button>
-              <button
-                onClick={() => setIntakeMode('chips')}
-                className={`pb-2 px-2.5 sm:px-3.5 flex items-center space-x-1.5 border-b-2 whitespace-nowrap shrink-0 transition-all ${
-                  intakeMode === 'chips' ? 'border-teal-600 text-teal-700' : 'border-transparent hover:text-slate-900'
-                }`}
-              >
-                <Activity size={14} />
-                <span>{language === 'zh' ? '部位点选' : 'Symptom Areas'}</span>
-              </button>
-            </div>
+        )}
 
-            {/* Real-time Emergency Keyword Alert Pill */}
-            {keywordDetection.triggered && (
-              <div className="p-3 bg-red-50 border-2 border-red-400 rounded-xl text-xs font-bold text-red-900 flex items-center justify-between animate-pulse">
-                <div className="flex items-center space-x-2">
-                  <AlertOctagon size={18} className="text-red-600 shrink-0" />
-                  <span>
-                    Emergency keyword detected: "{keywordDetection.matchedKeywords.join(', ')}"!
-                  </span>
-                </div>
-                <button
-                  onClick={() => {
-                    if (triageMode === 'agentic') {
-                      runAgenticTriage(textInput, {}, person, language).then(finalResult => {
-                        onTriageComplete(finalResult, {}, selectedAilment || undefined);
-                      });
-                      return;
-                    }
-                    const res = runTriage({
-                      text: textInput,
-                      ailmentCode: selectedAilment?.code,
-                      person,
-                      language,
-                    });
-                    onTriageComplete(res, {}, selectedAilment || undefined);
-                  }}
-                  className="bg-red-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-red-700"
-                >
-                  View Emergency Response →
-                </button>
+        {intakeMode === 'chips' && (
+          <div className="animate-in fade-in">
+            {isLoadingAilments ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
               </div>
-            )}
-
-            {/* Mode 1: Text Input with Inline Photo & Mic Shortcuts */}
-            {intakeMode === 'text' && (
-              <div className="space-y-3">
-                <textarea
-                  rows={3}
-                  value={textInput}
-                  onChange={e => setTextInput(e.target.value)}
-                  placeholder={
-                    language === 'zh'
-                      ? '例如：宝宝发烧38.8度，精神差，不吃奶...'
-                      : language === 'ms'
-                      ? 'Cth: Bayi demam 38.8C, tidak minum susu...'
-                      : 'E.g. Lucas has fever 38.8°C, irritable, not drinking milk...'
-                  }
-                  className="w-full p-3.5 rounded-xl border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 text-sm text-slate-900 resize-none"
-                />
-
-                {/* Attached Photo Preview (if photo added) */}
-                {photoUrl && (
-                  <div className="flex items-center space-x-3 p-2.5 bg-teal-50/60 border border-teal-200 rounded-xl">
-                    <img
-                      src={photoUrl}
-                      alt="Attached symptom"
-                      className="w-12 h-12 rounded-lg object-cover border border-teal-300 shadow-sm"
-                    />
-                    <div className="flex-1 text-xs">
-                      <div className="font-bold text-teal-900">Photo Attached for Clinical Review</div>
-                      <div className="text-[11px] text-teal-700 line-clamp-1">
-                        {photoDescriptors[0] || 'Visual inspection ready'}
-                      </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {ailments.map(a => (
+                  <button
+                    key={a.code}
+                    onClick={() => startAssessment(a)}
+                    title={a.description}
+                    className="p-4 rounded-2xl border-2 border-gray-100 bg-white hover:border-blue-400 hover:bg-blue-50/50 transition-all flex flex-col items-start gap-3 group text-left"
+                  >
+                    <div className="p-2.5 bg-gray-50 rounded-xl text-gray-600 group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
+                      {a.icon === 'Thermometer' ? <Thermometer size={20} /> :
+                       a.icon === 'Wind' ? <Wind size={20} /> :
+                       a.icon === 'Bandage' ? <Bandage size={20} /> :
+                       <Eye size={20} />}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPhotoUrl(null);
-                        setPhotoDescriptors([]);
-                      }}
-                      className="text-xs text-rose-600 hover:text-rose-800 font-bold px-2 py-1"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                )}
-
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
-                  {/* Action Shortcuts: Switch to Mic or Attach Photo */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIntakeMode('voice')}
-                      className="flex-1 sm:flex-initial px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors min-h-[40px]"
-                    >
-                      <Mic size={14} className="text-teal-600" />
-                      <span>Use Mic</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setIntakeMode('photo')}
-                      className="flex-1 sm:flex-initial px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors min-h-[40px]"
-                    >
-                      <Camera size={14} className="text-teal-600" />
-                      <span>Attach Photo</span>
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      const detected = detectAilmentFromText(textInput, selectedAilment);
-                      startAssessment(detected);
-                    }}
-                    disabled={!textInput.trim() && !photoUrl}
-                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center space-x-1.5 min-h-[44px]"
-                  >
-                    <span>Assess Symptoms</span>
-                    <ArrowRight size={15} />
+                    <div>
+                      <h4 className="font-bold text-gray-900 leading-tight">{a.name}</h4>
+                      <p className="text-xs text-gray-500 mt-1 line-clamp-1 group-hover:line-clamp-none transition-all">{a.description}</p>
+                    </div>
                   </button>
-                </div>
-
-                {/* Quick Test Scenario Pills placed at the bottom of the Assess Symptoms button */}
-                <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs">
-                  <span className="font-bold text-slate-500 flex items-center space-x-1 mr-1 shrink-0 text-[11px] uppercase tracking-wider">
-                    <Sparkles size={13} className="text-amber-500" />
-                    <span>Quick Scenarios:</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleQuickScenarioLucas}
-                    className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 px-2.5 py-1 rounded-lg font-medium transition-colors shrink-0 text-xs"
-                  >
-                    👶 Baby Lucas Fever (38.8°C)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleQuickScenarioAhBoonStroke}
-                    className="bg-red-50 hover:bg-red-100 text-red-900 border border-red-200 px-2.5 py-1 rounded-lg font-medium transition-colors shrink-0 text-xs"
-                  >
-                    👴 Grandpa Stroke FAST
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleQuickScenarioPhotoEye}
-                    className="bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200 px-2.5 py-1 rounded-lg font-medium transition-colors shrink-0 text-xs"
-                  >
-                    👁️ Red Eye Photo
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Mode 2: Real Microphone Voice Input (SRS INT-06) */}
-            {intakeMode === 'voice' && (
-              <div className="space-y-3">
-                <RealVoiceRecorder
-                  language={language}
-                  onTranscriptChange={(trans) => setTextInput(trans)}
-                />
-
-                {textInput && (
-                  <div className="flex justify-end pt-1">
-                    <button
-                      onClick={() => {
-                        const detected = detectAilmentFromText(textInput, selectedAilment);
-                        startAssessment(detected);
-                      }}
-                      className="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center space-x-1.5"
-                    >
-                      <span>Assess Voice Transcript</span>
-                      <ArrowRight size={15} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Mode 3: Real Photo Uploader with Camera (SRS INT-07, INT-08) */}
-            {intakeMode === 'photo' && (
-              <div className="space-y-3">
-                <RealPhotoUploader
-                  language={language}
-                  initialPhotoUrl={photoUrl}
-                  onPhotoAnalyzed={(dataUrl, descriptors, qualityOk) => {
-                    setPhotoUrl(dataUrl);
-                    setPhotoDescriptors(descriptors);
-                    if (!textInput) {
-                      setTextInput(`Visual inspection uploaded: ${descriptors[0] || 'Image examination'}`);
-                    }
-                  }}
-                />
-
-                <div className="flex items-center justify-between pt-1">
-                  <div className="text-xs text-slate-500">
-                    {photoDescriptors.length > 0
-                      ? `${photoDescriptors.length} descriptive cues ready for rule engine`
-                      : 'Upload photo or choose a preset sample above'}
-                  </div>
-                  <button
-                    onClick={() => {
-                      const detected = selectedAilment || AILMENTS.find(a => a.code === 'eye_symptoms') || AILMENTS[0];
-                      startAssessment(detected);
-                    }}
-                    disabled={!photoUrl && !textInput}
-                    className="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center space-x-1.5"
-                  >
-                    <span>Assess Image Cues</span>
-                    <ArrowRight size={15} />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Mode 4: Symptom Area Chips (SRS INT-02) */}
-            {intakeMode === 'chips' && (
-              <div className="space-y-3 pt-1">
-                <div className="text-xs font-bold text-[#52616B] dark:text-[#94A3B8] uppercase tracking-wider">
-                  {language === 'zh' ? '点击选择身体部位 / 常见症状：' : 'Select a symptom category to begin:'}
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {AILMENTS.map(ailment => {
-                    const isSelected = selectedAilment?.code === ailment.code;
-                    const displayName =
-                      language === 'zh' && ailment.nameZh
-                        ? ailment.nameZh
-                        : language === 'ms' && ailment.nameMs
-                        ? ailment.nameMs
-                        : ailment.name;
-
-                    const getAilmentIcon = (code: string) => {
-                      switch (code) {
-                        case 'fever': return Thermometer;
-                        case 'cough':
-                        case 'shortness_of_breath': return Wind;
-                        case 'dizziness': return RotateCw;
-                        case 'abdominal_pain':
-                        case 'vomiting':
-                        case 'diarrhea': return Activity;
-                        case 'rash':
-                        case 'minor_wound':
-                        case 'minor_burn': return Bandage;
-                        case 'eye_symptoms': return Eye;
-                        case 'headache':
-                        case 'chest_pain':
-                        case 'back_pain': return Zap;
-                        case 'confusion_neuro':
-                        case 'mental_health': return Brain;
-                        default: return MoreHorizontal;
-                      }
-                    };
-
-                    const Icon = getAilmentIcon(ailment.code);
-
-                    return (
-                      <button
-                        key={ailment.code}
-                        onClick={() => startAssessment(ailment)}
-                        className={`p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between min-h-[76px] ${
-                          isSelected
-                            ? 'border-[#0F766E] bg-[#E6F4F1] dark:bg-[#0F766E]/20 shadow-sm'
-                            : 'border-[#DDE5E9] dark:border-[#1E2D37] hover:border-[#0F766E] hover:bg-[#FAFBFA] dark:hover:bg-[#16232B] bg-white dark:bg-[#0F1A20]'
-                        }`}
-                        aria-label={`Symptom category: ${displayName}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className={`p-1.5 rounded-xl ${isSelected ? 'bg-[#0F766E] text-white' : 'bg-[#E6F4F1] dark:bg-[#0F766E]/20 text-[#0F766E] dark:text-[#5EEAD4]'}`}>
-                            <Icon size={18} strokeWidth={2} />
-                          </div>
-                          <div className="font-bold text-sm text-[#14212B] dark:text-[#F1F5F9] leading-tight">
-                            {displayName}
-                          </div>
-                        </div>
-                        <div className="text-[11px] text-[#52616B] dark:text-[#94A3B8] line-clamp-1 mt-2">
-                          {ailment.description}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                ))}
               </div>
             )}
           </div>
         )}
+
+        {intakeMode === 'text' && (
+          <div className="animate-in fade-in space-y-4">
+            <textarea
+              rows={4}
+              value={textInput}
+              onChange={e => setTextInput(e.target.value)}
+              placeholder={t.describeSymptomsPlaceholder}
+              className="w-full p-4 rounded-2xl border-2 border-gray-100 bg-gray-50/50 focus:border-blue-500 focus:bg-white focus:ring-0 text-gray-900 transition-all resize-none font-medium"
+            />
+            <div className="flex justify-end">
+              <button 
+                disabled={!textInput.trim()}
+                onClick={() => startAssessment(detectAilmentFromText(textInput))}
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-md transition-all flex items-center gap-2"
+              >
+                <span>{t.analyzeText}</span>
+                <Sparkles size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {intakeMode === 'voice' && (
+          <div className="animate-in fade-in">
+            <RealVoiceRecorder 
+              language={language}
+              onTranscriptChange={setTextInput}
+            />
+            {textInput && (
+              <div className="flex justify-end mt-4">
+                <button 
+                  onClick={() => startAssessment(detectAilmentFromText(textInput))}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center gap-2"
+                >
+                  <span>{t.assessVoice}</span>
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {intakeMode === 'photo' && (
+          <div className="animate-in fade-in">
+            <RealPhotoUploader 
+              language={language}
+              initialPhotoUrl={photoUrl}
+              onPhotoAnalyzed={(url, desc) => {
+                setPhotoUrl(url);
+                setPhotoDescriptors(desc);
+                if (!textInput) setTextInput(`Visual inspection uploaded: ${desc[0]}`);
+              }}
+            />
+            {(photoUrl || textInput) && (
+              <div className="flex justify-end mt-4">
+                <button 
+                  onClick={() => startAssessment(detectAilmentFromText(textInput || 'rash'))}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center gap-2"
+                >
+                  <span>{t.assessImage}</span>
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );

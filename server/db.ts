@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 
 import { AGENTIC_KNOWLEDGE_REPOSITORY } from '../src/engine/triageEngine.ts';
+import { AILMENTS, EMERGENCY_KEYWORDS } from '../src/engine/triageEngine_old.ts';
 import {
   ALL_HOUSEHOLDS,
   INITIAL_MEMBERS,
@@ -318,6 +319,34 @@ db.exec(`
     triage_rationale TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+
+  -- 14. Ailments (Dynamic Intake Categories)
+  CREATE TABLE IF NOT EXISTS ailments (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    name_zh TEXT NOT NULL,
+    name_ms TEXT NOT NULL,
+    icon TEXT NOT NULL,
+    description TEXT NOT NULL
+  );
+
+  -- 15. Emergency Keywords (Real-time detection)
+  CREATE TABLE IF NOT EXISTS emergency_keywords (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword TEXT NOT NULL,
+    language TEXT NOT NULL
+  );
+  -- 16. Triage Decisions (Deterministic DB Mapping)
+  CREATE TABLE IF NOT EXISTS triage_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ailment_code TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    status_action TEXT NOT NULL,
+    otc_medications_json TEXT NOT NULL,
+    home_care_json TEXT NOT NULL,
+    telemed_partners_json TEXT NOT NULL,
+    UNIQUE(ailment_code, severity)
+  );
 `);
 
 // 数据库迁移：添加 sdk_session_id 列（如果不存在）
@@ -398,6 +427,55 @@ export function seedAllDatasetsIfEmpty(): void {
 
   // B. 提案库迁移
   try {
+    const ailmentCount = (db.prepare('SELECT count(*) as count FROM ailments').get() as { count: number }).count;
+    if (ailmentCount === 0) {
+      console.log('[DB Seed] Seeding ailments...');
+      const insertStmt = db.prepare('INSERT INTO ailments (code, name, name_zh, name_ms, icon, description) VALUES (?, ?, ?, ?, ?, ?)');
+      const tx = db.transaction(() => {
+        for (const a of AILMENTS) {
+          insertStmt.run(a.code, a.name, a.nameZh, a.nameMs, a.icon, a.description);
+        }
+      });
+      tx();
+    }
+
+    const keywordCount = (db.prepare('SELECT count(*) as count FROM emergency_keywords').get() as { count: number }).count;
+    if (keywordCount === 0) {
+      console.log('[DB Seed] Seeding emergency keywords...');
+      const insertStmt = db.prepare('INSERT INTO emergency_keywords (keyword, language) VALUES (?, ?)');
+      const tx = db.transaction(() => {
+        for (const [lang, keywords] of Object.entries(EMERGENCY_KEYWORDS)) {
+          for (const kw of keywords) {
+            insertStmt.run(kw, lang);
+          }
+        }
+      });
+      tx();
+    }
+
+    const decisionCount = (db.prepare('SELECT count(*) as count FROM triage_decisions').get() as { count: number }).count;
+    if (decisionCount === 0) {
+      console.log('[DB Seed] Seeding triage decisions...');
+      const insertStmt = db.prepare('INSERT INTO triage_decisions (ailment_code, severity, status_action, otc_medications_json, home_care_json, telemed_partners_json) VALUES (?, ?, ?, ?, ?, ?)');
+      
+      const seedDecisions = [
+        { code: 'fever', severity: 'GREEN', action: 'Home Care', otc: ['Paracetamol', 'Ibuprofen'], care: ['Drink plenty of water', 'Rest'], telemed: [] },
+        { code: 'fever', severity: 'YELLOW', action: 'Teledoctor / GP', otc: ['Paracetamol'], care: ['Tepid sponging'], telemed: ['Whitecoat', 'Doctor Anywhere'] },
+        { code: 'fever', severity: 'ORANGE', action: 'GP after monitoring', otc: [], care: ['Monitor closely'], telemed: [] },
+        { code: 'fever', severity: 'RED', action: 'Emergency (A&E)', otc: [], care: ['Keep patient calm', 'Do not feed'], telemed: [] },
+        { code: 'cough', severity: 'GREEN', action: 'Home Care', otc: ['Prospan', 'Cough Syrup'], care: ['Drink warm water'], telemed: [] },
+        { code: 'cough', severity: 'YELLOW', action: 'Teledoctor / GP', otc: ['Prospan'], care: ['Avoid cold drinks'], telemed: ['Whitecoat', 'Doctor Anywhere'] },
+        { code: 'cold', severity: 'GREEN', action: 'Home Care', otc: ['Zyrtec'], care: ['Drink warm water'], telemed: [] },
+        { code: 'cold', severity: 'YELLOW', action: 'Teledoctor / GP', otc: ['Zyrtec'], care: ['Avoid cold drinks'], telemed: ['Whitecoat', 'Doctor Anywhere'] }
+      ];
+      
+      const tx = db.transaction(() => {
+        for (const d of seedDecisions) {
+          insertStmt.run(d.code, d.severity, d.action, JSON.stringify(d.otc), JSON.stringify(d.care), JSON.stringify(d.telemed));
+        }
+      });
+      tx();
+    }
     const propCount = (db.prepare('SELECT count(*) as count FROM kb_proposals').get() as { count: number }).count;
     if (propCount === 0) {
       console.log(`[DB Seed] Migrating ${INITIAL_KB_PROPOSALS.length} proposals to SQLite...`);
@@ -1234,7 +1312,31 @@ export function savePerson(p: Person): boolean {
   return true;
 }
 
+export function deletePerson(id: string): boolean {
+  const stmt = db.prepare('DELETE FROM persons WHERE id = ?');
+  stmt.run(id);
+  return true;
+}
+
 // --- 家庭户籍 CRUD ---
+export function saveHousehold(h: Household): boolean {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO households (
+      id, name, default_region, addresses, emergency_contacts, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    h.id,
+    h.name,
+    h.defaultRegion || null,
+    JSON.stringify(h.addresses || []),
+    JSON.stringify(h.emergencyContacts || []),
+    h.createdAt || new Date().toISOString(),
+    new Date().toISOString()
+  );
+  return true;
+}
+
 export function getAllHouseholds(): Household[] {
   const rows = db.prepare('SELECT * FROM households ORDER BY name ASC').all() as any[];
   return rows.map(r => ({
@@ -2086,6 +2188,52 @@ export function createTriageAssessment(assessment: any): boolean {
 
 export function getTriageAssessments(): any[] {
   return db.prepare('SELECT * FROM triage_assessments ORDER BY created_at DESC').all();
+}
+
+export function getAilments(): any[] {
+  const rows = db.prepare('SELECT * FROM ailments').all() as any[];
+  return rows.map(r => ({
+    code: r.code,
+    name: r.name,
+    nameZh: r.name_zh,
+    nameMs: r.name_ms,
+    icon: r.icon,
+    description: r.description
+  }));
+}
+
+export function getEmergencyKeywords(lang: string = 'en'): string[] {
+  const rows = db.prepare('SELECT keyword FROM emergency_keywords WHERE language = ?').all(lang) as any[];
+  return rows.map(r => r.keyword);
+}
+
+export function getTriageQuestions(ailmentCode: string, isChild: boolean): any[] | null {
+  try {
+    const row = db.prepare('SELECT questions_json FROM triage_questions WHERE ailment_code = ? AND is_child = ?').get(ailmentCode, isChild ? 1 : 0) as any;
+    if (row && row.questions_json) {
+      return JSON.parse(row.questions_json);
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function getTriageDecision(ailmentCode: string, severity: string): any {
+  try {
+    const row = db.prepare('SELECT * FROM triage_decisions WHERE ailment_code = ? AND severity = ?').get(ailmentCode, severity) as any;
+    if (row) {
+      return {
+        action: row.status_action,
+        otcMedications: JSON.parse(row.otc_medications_json),
+        homeCare: JSON.parse(row.home_care_json),
+        telemedPartners: JSON.parse(row.telemed_partners_json)
+      };
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
 }
 
 export default db;

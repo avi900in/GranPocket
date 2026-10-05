@@ -38,6 +38,7 @@ interface FamilyProfilesViewProps {
   allHouseholds?: Household[];
   onSwitchHousehold?: (householdId: string) => void;
   onResetDemoData?: () => void;
+  onDeleteMember?: (personId: string) => void;
   currentUser?: Person | null;
   canEditHousehold?: boolean;
   canManageCareLinks?: boolean;
@@ -55,6 +56,7 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
   allHouseholds,
   onSwitchHousehold,
   onResetDemoData,
+  onDeleteMember,
   currentUser,
   canEditHousehold = false,
   canManageCareLinks = false,
@@ -71,6 +73,7 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
   const [editSex, setEditSex] = useState(selectedPerson.sex);
   const [editRelationship, setEditRelationship] = useState(selectedPerson.relationshipLabel);
   const [editPhone, setEditPhone] = useState(selectedPerson.phone || '');
+  const [editPostalCode, setEditPostalCode] = useState(selectedPerson.postalCode || '');
   const [editBloodType, setEditBloodType] = useState(selectedPerson.medicalProfile.bloodType || 'O+');
   const [editWeight, setEditWeight] = useState(selectedPerson.medicalProfile.weight || 0);
 
@@ -191,6 +194,7 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
     setEditSex(target.sex);
     setEditRelationship(target.relationshipLabel);
     setEditPhone(target.phone || '');
+    setEditPostalCode(target.postalCode || '');
     setEditBloodType(target.medicalProfile.bloodType || 'O+');
     setEditWeight(target.medicalProfile.weight || 0);
     setConditions([...target.medicalProfile.conditions]);
@@ -212,6 +216,7 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
       sex: editSex,
       relationshipLabel: editRelationship,
       phone: editPhone || undefined,
+      postalCode: editPostalCode || undefined,
       medicalProfile: {
         ...selectedPerson.medicalProfile,
         bloodType: editBloodType,
@@ -461,13 +466,28 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
 
               <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
                 {(canEditHousehold || member.id === currentUser?.id) ? (
-                  <button
-                    onClick={() => handleOpenEdit(member)}
-                    className="font-bold text-teal-700 hover:text-teal-900 hover:underline flex items-center space-x-1"
-                  >
-                    <Edit3 size={11} />
-                    <span>Edit</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleOpenEdit(member)}
+                      className="font-bold text-teal-700 hover:text-teal-900 hover:underline flex items-center space-x-1"
+                    >
+                      <Edit3 size={11} />
+                      <span>Edit</span>
+                    </button>
+                    {currentUser?.systemRole === 'ADMIN' && member.id !== currentUser?.id && onDeleteMember && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Are you sure you want to delete ${member.name}?`)) {
+                            onDeleteMember(member.id);
+                          }
+                        }}
+                        className="font-bold text-red-500 hover:text-red-700 hover:underline flex items-center space-x-1"
+                        title="Delete member"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <span className="text-slate-400 font-medium flex items-center space-x-1">
                     <Lock size={11} />
@@ -515,7 +535,7 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
                 </span>
               </div>
               <div className="text-xs text-slate-500 mt-0.5">
-                Role: <strong className="text-teal-700">{selectedPerson.systemRole}</strong> • Phone: {selectedPerson.phone || 'No phone'} • Blood: <strong className="text-slate-800">{selectedPerson.medicalProfile.bloodType || 'O+'}</strong>
+                Role: <strong className="text-teal-700">{selectedPerson.systemRole}</strong> • Phone: {selectedPerson.phone || 'No phone'} • Postal: {selectedPerson.postalCode || 'N/A'} • Blood: <strong className="text-slate-800">{selectedPerson.medicalProfile.bloodType || 'O+'}</strong>
                 {selectedPerson.medicalProfile.weight ? ` • Weight: ${selectedPerson.medicalProfile.weight}kg` : ''}
               </div>
             </div>
@@ -931,6 +951,18 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
                     value={editPhone}
                     onChange={e => setEditPhone(e.target.value)}
                     placeholder="e.g. 9123-4567"
+                    className="w-full mt-1 p-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Postal Code (Optional)</label>
+                  <input
+                    type="text"
+                    value={editPostalCode}
+                    onChange={e => setEditPostalCode(e.target.value)}
+                    placeholder="e.g. 123456"
+                    maxLength={6}
                     className="w-full mt-1 p-2 rounded-xl border border-slate-300 text-xs text-slate-900"
                   />
                 </div>

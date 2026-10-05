@@ -77,7 +77,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
     role: 'APP_OWNER',
     label: 'Platform & Clinical Governance Director',
     description: 'System owner & medical director; manages RBAC, triage rules, facilities, and integrations.',
-    allowedScreens: ['owner_admin', 'clinical_kb', 'facilities', 'pdpa_audit'],
+    allowedScreens: ['owner_admin', 'app_workspace', 'clinical_kb', 'facilities', 'pdpa_audit'],
     capabilities: {
       edit_household: 'full',
       manage_care_links: 'full',
@@ -101,7 +101,8 @@ export const ALL_SCREENS_META: { id: ScreenKey; name: string; description: strin
   { id: 'facilities', name: 'Hospitals & A&E', description: 'Interactive Singapore map, real-time nearest facility finder, and wait times', category: 'family' },
   { id: 'clinical_kb', name: 'Override Rule Harvesting and Governance', description: 'MOH/SMC clinician approval workflow and medical governance gate', category: 'system' },
   { id: 'pdpa_audit', name: 'Audit & PDPA Logs', description: 'Cryptographic immutable audit trail, consent records, and access history', category: 'system' },
-  { id: 'owner_admin', name: 'App Owner Workspace', description: 'RBAC controls, triage rule builder, hospital manager, and hardware/IoT integrations', category: 'system' },
+  { id: 'owner_admin', name: 'App Owner Clinical Lab', description: 'Triage rule builder, agentic simulator, and override harvesting', category: 'system' },
+  { id: 'app_workspace', name: 'App Workspace', description: 'RBAC controls, integrations, customer feedback, and hospital/insurance registry', category: 'system' },
 ];
 
 export const CAPABILITIES_META: { id: keyof RolePermissions['capabilities']; label: string; description: string }[] = [

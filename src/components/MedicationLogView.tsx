@@ -400,7 +400,7 @@ export const MedicationLogView: React.FC<MedicationLogViewProps> = ({
                   <div className="mt-1 flex items-center space-x-2">
                     <button
                       type="button"
-                      onClick={() => setPhotoUrl('https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60')}
+                      onClick={() => setPhotoUrl('/images/axcel_paracetamol_250.jpg')}
                       className="flex items-center space-x-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium border border-slate-200"
                     >
                       <Camera size={14} />

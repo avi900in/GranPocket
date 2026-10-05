@@ -17,6 +17,7 @@ interface CreateHouseholdModalProps {
   }) => void;
   language: Language;
   initialPhone?: string;
+  existingPhones: string[];
 }
 
 export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
@@ -25,6 +26,7 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
   onCreateHousehold,
   language,
   initialPhone,
+  existingPhones,
 }) => {
   const [name, setName] = useState('');
   const [postalCode, setPostalCode] = useState('640456');
@@ -32,7 +34,7 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
   const [caregiverName, setCaregiverName] = useState('');
   const [caregiverRole, setCaregiverRole] = useState('Mother / Primary Caregiver');
   const [caregiverPhone, setCaregiverPhone] = useState(initialPhone || '9876-5432');
-  const [seedSampleData, setSeedSampleData] = useState(true);
+  const [seedSampleData, setSeedSampleData] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   React.useEffect(() => {
@@ -74,6 +76,23 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
     }
     if (!caregiverName.trim()) {
       setError('Please enter the primary caregiver or family admin name.');
+      return;
+    }
+
+    const cleanNewPhone = caregiverPhone.replace(/[^0-9]/g, '');
+    if (cleanNewPhone.length < 7) {
+      setError('Please enter a valid phone number (at least 7 digits).');
+      return;
+    }
+
+    const isDuplicate = existingPhones.some(p => {
+      const cleanP = p.replace(/[^0-9]/g, '');
+      if (cleanP.length < 7) return false;
+      return cleanP.endsWith(cleanNewPhone.slice(-8)) || cleanNewPhone.endsWith(cleanP.slice(-8));
+    });
+
+    if (isDuplicate) {
+      setError('An account with this phone number already exists. Please log in instead.');
       return;
     }
 

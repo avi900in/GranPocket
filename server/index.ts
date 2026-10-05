@@ -1,7 +1,30 @@
 import express from "express";
+import fs from "fs";
+import path from "path";
+
+try {
+  const envPath = path.resolve(process.cwd(), '.env');
+  if (fs.existsSync(envPath)) {
+    const envFile = fs.readFileSync(envPath, 'utf8');
+    envFile.split('\n').forEach(line => {
+      const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+      if (match) {
+        const key = match[1];
+        let value = match[2] || '';
+        if (value.length > 0 && value.charAt(0) === '"' && value.charAt(value.length - 1) === '"') {
+          value = value.replace(/\\n/gm, '\n');
+        }
+        value = value.replace(/(^['"]|['"]$)/g, '').trim();
+        process.env[key] = value;
+      }
+    });
+  }
+} catch (e) {
+  // Ignore env parse errors
+}
 import { query, unstable_v2_createSession, unstable_v2_authenticate, PermissionResult, CanUseTool } from "@tencent-ai/agent-sdk";
 import { v4 as uuidv4 } from "uuid";
-import path from "path";
+
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -31,7 +54,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // 缓存可用模型列表
 let cachedModels: Array<{ modelId: string; name: string; description?: string }> = [];
@@ -944,6 +968,8 @@ import {
   executeDynamicMlAgent,
   executeDynamicHomeMedicationAgent,
   extractContextExcerpt,
+  executeDynamicQuestionAgent,
+  executeDynamicVisionAgent,
 } from "./dynamicAgents.js";
 
 // 1. Run Dynamic Agentic Pipeline (with Doctor Attestation Loop & SQLite persistence)
@@ -965,6 +991,36 @@ app.post("/api/agentic/execute", async (req, res) => {
   } catch (error: any) {
     console.error("[Agentic Pipeline API] Error:", error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Generate dynamic triage questions
+app.post("/api/triage/questions", async (req, res) => {
+  try {
+    const { ailmentCode, person } = req.body;
+    if (!ailmentCode) {
+      return res.status(400).json({ error: "Missing ailmentCode" });
+    }
+    const questions = await executeDynamicQuestionAgent(ailmentCode, person);
+    res.json({ success: true, questions });
+  } catch (error: any) {
+    console.error("[Question Agent API] Error:", error);
+    res.status(500).json({ success: false, error: error.message, questions: [] });
+  }
+});
+
+// Dynamic @vision_agent (Image-to-Text Perception)
+app.post("/api/agentic/vision", async (req, res) => {
+  try {
+    const { imageBase64 } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Missing imageBase64 payload" });
+    }
+    const descriptors = await executeDynamicVisionAgent(imageBase64);
+    res.json({ success: true, descriptors });
+  } catch (error: any) {
+    console.error("[Vision Agent API] Error:", error);
+    res.status(500).json({ success: false, error: error.message, descriptors: [] });
   }
 });
 
@@ -1017,6 +1073,25 @@ app.post("/api/agentic/ml-calibrate", async (req, res) => {
 // =========================================================================
 
 // Database Statistics
+app.get("/api/db/ailments", (req, res) => {
+  try {
+    const ailments = db.getAilments();
+    res.json(ailments);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/db/keywords", (req, res) => {
+  try {
+    const lang = req.query.lang as string || 'en';
+    const keywords = db.getEmergencyKeywords(lang);
+    res.json(keywords);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get("/api/db/stats", (req, res) => {
   try {
     const stats = db.getDbStats();
@@ -1100,8 +1175,20 @@ app.get("/api/db/persons", (req, res) => {
 app.post("/api/db/persons", (req, res) => {
   try {
     const person = req.body;
+    console.log("[POST /api/db/persons] Received person:", person.id, person.name);
     db.savePerson(person);
+    console.log("[POST /api/db/persons] Successfully saved person to DB.");
     res.json({ success: true, message: "Patient saved to SQLite", person });
+  } catch (err: any) {
+    console.error("[POST /api/db/persons] ERROR:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete("/api/db/persons/:id", (req, res) => {
+  try {
+    db.deletePerson(req.params.id);
+    res.json({ success: true, message: "Patient deleted from SQLite" });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1122,6 +1209,16 @@ app.get("/api/db/households", (req, res) => {
   try {
     const households = db.getAllHouseholds();
     res.json({ success: true, households });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/db/households", (req, res) => {
+  try {
+    const household = req.body;
+    db.saveHousehold(household);
+    res.json({ success: true, message: "Household saved to SQLite", household });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -2064,3 +2161,30 @@ app.listen(PORT, () => {
   `);
 });
 
+
+// ============= Multi-Agent Swarm Harvesting API (Phase 1) =============
+import { executeRuleHarvestingSwarm } from './harvestingAgents.js';
+
+app.post('/api/agentic/swarm-harvest', async (req, res) => {
+  try {
+    const { inputData, dataType, sourceName } = req.body;
+    if (!inputData) return res.status(400).json({ error: 'Missing inputData' });
+    
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    
+    // Send initial log
+    res.write(`data: ${JSON.stringify({ log: 'Initializing Agent Swarm...' })}\n\n`);
+    
+    // Execute swarm
+    const swarmResult = await executeRuleHarvestingSwarm(inputData, dataType || 'text', sourceName || 'User Upload');
+    
+    // Send final result
+    res.write(`data: ${JSON.stringify({ log: 'Swarm processing complete', proposals: swarmResult.proposals || [] })}\n\n`);
+    res.end();
+  } catch (error: any) {
+    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    res.end();
+  }
+});

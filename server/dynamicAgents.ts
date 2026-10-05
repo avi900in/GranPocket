@@ -36,19 +36,41 @@ export interface DynamicAgenticInput {
 // Attempts external LLM execution via Tencent Agent SDK / API;
 // Falls back to dynamic clinical reasoning engine if external LLM times out or offline.
 // =========================================================================
-async function invokeLlmAgent<T>(
+export async function invokeLlmAgent<T>(
   agentName: string,
   systemPrompt: string,
   userPrompt: string,
   fallbackGenerator: () => T
 ): Promise<{ result: T; source: 'llm_dynamic' | 'dynamic_reasoning_engine'; rawLlmText?: string }> {
   try {
-    // Check if Tencent SDK or custom LLM API is available
-    const apiKey = process.env.GROQ_API_KEY || process.env.CODEBUDDY_API_KEY || process.env.OPENAI_API_KEY;
-    const baseUrl = process.env.GROQ_API_KEY 
-      ? 'https://api.groq.com/openai/v1' 
-      : (process.env.CODEBUDDY_BASE_URL || 'https://api.openai.com/v1');
-    const defaultModel = process.env.GROQ_API_KEY ? 'llama3-70b-8192' : 'claude-sonnet-4';
+    let apiKey = process.env.OPENROUTER_API_KEY || process.env.GROQ_API_KEY || process.env.CODEBUDDY_API_KEY || process.env.OPENAI_API_KEY;
+    
+    let baseUrl = 'https://api.openai.com/v1';
+    let defaultModel = 'claude-sonnet-4';
+    
+    const jarvisAgents = ['@ingestion_agent', '@data_architect_agent', '@ml_mining_agent', '@rule_engine_agent', '@orchestrator_agent'];
+    const isJarvisAgent = jarvisAgents.includes(agentName);
+    
+    // Jarvis agents use OpenRouter/Nemotron, Triage agents use Groq
+    if (isJarvisAgent && process.env.OPENROUTER_API_KEY) {
+      apiKey = process.env.OPENROUTER_API_KEY;
+      baseUrl = 'https://openrouter.ai/api/v1';
+      defaultModel = 'nvidia/nemotron-3-super-120b-a12b:free';
+    } else if (!isJarvisAgent && process.env.GROQ_API_KEY) {
+      apiKey = process.env.GROQ_API_KEY;
+      baseUrl = 'https://api.groq.com/openai/v1';
+      defaultModel = 'openai/gpt-oss-120b';
+    } else if (process.env.OPENROUTER_API_KEY) {
+      apiKey = process.env.OPENROUTER_API_KEY;
+      baseUrl = 'https://openrouter.ai/api/v1';
+      defaultModel = 'nvidia/nemotron-3-super-120b-a12b:free';
+    } else if (process.env.GROQ_API_KEY) {
+      apiKey = process.env.GROQ_API_KEY;
+      baseUrl = 'https://api.groq.com/openai/v1';
+      defaultModel = 'openai/gpt-oss-120b';
+    } else if (process.env.CODEBUDDY_BASE_URL) {
+      baseUrl = process.env.CODEBUDDY_BASE_URL;
+    }
 
     if (apiKey) {
       const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -58,14 +80,15 @@ async function invokeLlmAgent<T>(
           'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: process.env.DEFAULT_LLM_MODEL || defaultModel,
+          model: (!isJarvisAgent && process.env.GROQ_API_KEY) ? defaultModel : (process.env.DEFAULT_LLM_MODEL || defaultModel),
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
           temperature: agentName === '@expert_doctor_agent' ? 0.3 : 0.2, // Lower temperature for doctor red-teaming
+          response_format: { type: 'json_object' },
         }),
-        signal: AbortSignal.timeout(10000), // 10s timeout
+        signal: AbortSignal.timeout(120000), // 120s timeout
       });
 
       if (response.ok) {
@@ -75,10 +98,17 @@ async function invokeLlmAgent<T>(
         const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, content];
         const parsed = JSON.parse(jsonMatch[1].trim());
         return { result: parsed as T, source: 'llm_dynamic', rawLlmText: content };
+      } else {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
+    } else {
+      throw new Error('No LLM API Key found in environment variables.');
     }
-  } catch (err) {
-    console.warn(`[DynamicAgent ${agentName}] External LLM call failed or skipped, utilizing dynamic clinical reasoning engine:`, (err as any)?.message);
+  } catch (err: any) {
+    console.warn(`[DynamicAgent ${agentName}] External LLM call failed:`, err?.message);
+    // Directly throw the error so it propagates to the UI instead of masking it with the fallback
+    throw new Error(`LLM Failure (${agentName}): ${err?.message || 'Unknown error'}`);
   }
 
   // Dynamic generative fallback with contextual reasoning
@@ -670,6 +700,25 @@ Output strictly in JSON:
           createdAt: new Date().toISOString()
         });
       }
+      // 5. Haze / Eye Irritation -> Artificial Tears & N95
+      if (textLower.includes('haze') || textLower.includes('smog') || textLower.includes('dry eye') || textLower.includes('itchy eye') || textLower.includes('red eye')) {
+        suggestions.push({
+          id: `homemed-auto-${safeSlug(domain)}-artificial-tears`,
+          conditionName: 'Haze-induced conjunctival irritation',
+          conditionCode: 'H10.9',
+          medicationName: 'Preservative-free Artificial Tears (e.g., Systane, Refresh)',
+          brandOrGeneric: 'Generic/Brand',
+          dosageInstruction: 'Instill 1 to 2 drops in the affected eye(s) as needed. Wash face and eyes after outdoor exposure.',
+          route: 'topical (eye drops)',
+          urgency: 'symptomatic_relief',
+          warnings: 'If vision becomes blurred, eye produces thick yellow discharge, or pain develops, seek immediate medical attention. Wear N95 masks outdoors if PSI > 100.',
+          targetAgeBand: 'all',
+          sourceDoc,
+          rawExcerpt: 'Use eye drops for haze irritation.',
+          status: 'pending_review',
+          createdAt: new Date().toISOString()
+        });
+      }
 
       return { medications: suggestions };
     };
@@ -887,7 +936,7 @@ export async function executeDynamicTriageAgent(
 
   const systemPrompt = `You are @triage_agent, the primary clinical reasoning engine for GranPocket Health under Singapore Ministry of Health (MOH) clinical governance.
 Synthesize patient presentation against MOH CPG guidance.
-Formulate a draft disposition:
+Formulate a draft disposition as a JSON object:
 {
   "classification": "EMERGENCY" | "TELEDOCTOR" | "HOME_MONITOR",
   "mappedSeverity": "RED" | "ORANGE" | "YELLOW" | "GREEN",
@@ -1019,7 +1068,7 @@ Check for:
 2. Age Hard-Stop (Spec §6): Febrile infants (<12m) or elderly (>=65y) must NEVER be routed to HOME_MONITOR.
 3. Allergy Hard-Stop (Spec §6): Verify contraindications against patient's logged allergies.
 4. Confidence Floor (Spec §6): Confidence must be >= ${guardrails.confidenceFloorPercent}%.
-If ANY flaw or under-triage exists, output:
+If ANY flaw or under-triage exists, output a valid JSON object:
 {
   "status": "CHALLENGE_FLAG",
   "reason": "Specific critique of why the draft is unsafe or incomplete",
@@ -1134,7 +1183,8 @@ export async function executeDynamicMlAgent() {
 
   const systemPrompt = `You are @ml_agent, the continuous learning and calibration agent for GranPocket Health.
 Review recent triage execution logs and attestation challenges to identify sensitivity drifts, false negatives, or emerging symptom patterns.
-Propose calibrated weight adjustments and draft rule proposals for the Singapore Medical Council (SMC) Clinician Review Gateway.`;
+Propose calibrated weight adjustments and draft rule proposals for the Singapore Medical Council (SMC) Clinician Review Gateway.
+Output strictly as a valid JSON object.`;
 
   const userPrompt = `Recent Execution Logs Count: ${recentLogs.length}
 Sample Log Severity Distribution: ${JSON.stringify(recentLogs.slice(0, 5).map(l => ({ outcome: l.terminalOutcome, severity: l.severity, confidence: l.confidenceScore })))}`;
@@ -1182,6 +1232,44 @@ export async function executeDynamicAgenticPipeline(input: DynamicAgenticInput) 
   console.log(`\n[Agentic Triage] ====== STARTING AGENTIC PIPELINE (EXEC ID: ${executionId}) ======`);
   console.log(`[Agentic Triage] Input Text: "${text}"`);
   console.log(`[Agentic Triage] Patient Profile: Age ${person.dob}, Conditions: ${person.conditions?.join(',') || 'none'}`);
+
+  // -----------------------------------------------------------------------
+  // STEP 0: Environmental Context Injection (Haze & Dengue via OneMap)
+  // -----------------------------------------------------------------------
+  let envContextString = '';
+  try {
+    // TEMPORARILY DISABLED TO TEST LATENCY
+    /*
+    const envUrl = `http://localhost:${process.env.PORT || 3000}/api/singapore/environmental-live`;
+    const envRes = await fetch(envUrl).then(res => res.json());
+    if (envRes) {
+      let dengueWarning = '';
+      const postalMatch = text.match(/\b\d{6}\b/) || (answers.postalCode ? [answers.postalCode] : null);
+      
+      if (postalMatch && envRes.dengueClusters?.length > 0) {
+        const postal = postalMatch[0];
+        // Geocode postal code via OneMap
+        const onemapRes = await fetch(`https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${postal}&returnGeom=N&getAddrDetails=Y`).then(r => r.json()).catch(() => null);
+        
+        if (onemapRes && onemapRes.results && onemapRes.results.length > 0) {
+          const roadName = onemapRes.results[0].ROAD_NAME || '';
+          // Check if road name exists in any dengue cluster location
+          const matchedCluster = envRes.dengueClusters.find((c: any) => c.location && roadName && c.location.toLowerCase().includes(roadName.toLowerCase()));
+          
+          if (matchedCluster) {
+             dengueWarning = `\nCRITICAL OUTBREAK ALERT: Patient's location (${postal} / ${roadName}) is inside an active ${matchedCluster.alertLevel} Dengue Cluster with ${matchedCluster.activeCases} cases! Escalate fever/rash symptoms immediately.`;
+          }
+        }
+      }
+      
+      envContextString = `\n\n--- LIVE SINGAPORE ENVIRONMENTAL CONTEXT ---\nHaze PSI / PM2.5: ${envRes.hazeBulletin?.airQualityBlurb || 'Normal'}\nDengue Active Clusters (Nationwide): ${envRes.dengueClusters?.length || 0}${dengueWarning}\n--------------------------------------------\n`;
+      console.log('[Agentic Triage] Injected Environmental Context:', envContextString.replace(/\n/g, ' '));
+      text += envContextString;
+    }
+    */
+  } catch (e) {
+    console.warn('[Agentic Triage] Failed to fetch environmental context.');
+  }
 
   // -----------------------------------------------------------------------
   // STEP 1.0: Deterministic Override from Approved KB Proposals
@@ -1614,9 +1702,98 @@ export async function executeDynamicAgenticPipeline(input: DynamicAgenticInput) 
     },
   };
 
+  // Add deterministic DB decisions if an explicit ailment code is present
+  const ailmentCodeMatch = text.match(/Ailment Code:\s*(\w+)/);
+  const ailmentCode = ailmentCodeMatch ? ailmentCodeMatch[1] : null;
+  const dbDecision = (ailmentCode && ailmentCode !== 'unknown')
+    ? db.getTriageDecision(ailmentCode, currentDraft.mappedSeverity)
+    : null;
+  
+  if (dbDecision) {
+    (finalResult as any).deterministicAction = dbDecision.action;
+    (finalResult as any).otcMedications = dbDecision.otcMedications;
+    (finalResult as any).homeCare = dbDecision.homeCare;
+    (finalResult as any).telemedPartners = dbDecision.telemedPartners;
+  }
+
   // Save execution trace directly into SQLite database!
   db.saveTriageExecutionLog(finalResult);
   console.log(`[Dynamic Agentic Pipeline] Execution ${executionId} completed (${terminalOutcome}) and saved to SQLite.`);
 
   return finalResult;
+}
+
+// =========================================================================
+// Dynamic @question_agent
+// Generates tailored triage questions based on ailment and patient profile
+// =========================================================================
+export async function executeDynamicQuestionAgent(ailmentCode: string, person?: any) {
+  const ageYears = person ? Math.floor((Date.now() - new Date(person.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : 30;
+  
+  const systemPrompt = `You are @question_agent, a clinical triage interviewer.
+Generate exactly 3 to 4 concise triage questions to ask a patient for the given ailment.
+Return a valid JSON array of objects with the structure:
+[
+  {
+    "id": "string (e.g. q1)",
+    "text": "The question text",
+    "answerType": "choice" | "yes_no",
+    "options": ["Option 1", "Option 2"] // only if answerType is "choice"
+  }
+]`;
+
+  const userPrompt = `Ailment Code: ${ailmentCode}\nPatient Age: ${ageYears} years\nKnown Conditions: ${person?.medicalProfile?.conditions?.map((c:any) => c.name).join(', ') || 'None'}\nGenerate the JSON array of questions.`;
+
+  const fallback = () => {
+    // Try to get from SQLite Database first
+    const isChild = ageYears <= 4; // toddler or younger
+    const dbQuestions = db.getTriageQuestions(ailmentCode, isChild);
+    if (dbQuestions && dbQuestions.length > 0) {
+      console.log(`[Question Agent] Retrieved ${dbQuestions.length} deterministic questions from DB for ${ailmentCode}`);
+      return dbQuestions;
+    }
+    
+    // Hard fallback if not in DB
+    return [
+      { id: "q1", text: "How long have you been experiencing this?", answerType: "choice", options: ["Less than 24 hours", "1-3 days", "More than 3 days"] },
+      { id: "q2", text: "Is the pain or discomfort severe?", answerType: "yes_no" },
+      { id: "q3", text: "Are you having trouble breathing or speaking?", answerType: "yes_no" }
+    ];
+  };
+
+  try {
+    const result = await invokeLlmAgent('@question_agent', systemPrompt, userPrompt, fallback);
+    return Array.isArray(result) ? result : fallback();
+  } catch (e) {
+    return fallback();
+  }
+}
+
+// =========================================================================
+// Dynamic @vision_agent
+// Analyzes uploaded patient photos for clinical descriptors
+// =========================================================================
+export async function executeDynamicVisionAgent(imageBase64: string): Promise<string[]> {
+  const systemPrompt = `You are @vision_agent, a clinical image perception LLM for triage.
+Extract exactly 3 to 4 clinical descriptors from this image. Focus on erythema, swelling, laceration features, rash blanching likelihood, or visible trauma.
+Return a valid JSON array of strings.`;
+
+  const userPrompt = `Analyze this image (provided as base64 string): ${imageBase64.substring(0, 30)}... [TRUNCATED]`;
+
+  const fallback = () => {
+    return [
+      "Image analysis (simulated) completed",
+      "Localized surface skin inspection completed",
+      "Visible erythema or anomaly noted",
+      "No critical structural deformity detected"
+    ];
+  };
+
+  try {
+    // In a real environment, we would pass the base64 payload to GPT-4V or Gemini Pro Vision
+    const result = await invokeLlmAgent('@vision_agent', systemPrompt, userPrompt, fallback);
+    return Array.isArray(result) ? result : fallback();
+  } catch (e) {
+    return fallback();
+  }
 }

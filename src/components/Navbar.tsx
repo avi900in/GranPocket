@@ -106,17 +106,17 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'medications', label: language === 'zh' ? '用药记录' : language === 'ms' ? 'Log Ubat' : 'Medication Log', icon: Pill },
     { id: 'monitoring', label: language === 'zh' ? '随访监测' : language === 'ms' ? 'Pemantauan' : 'Monitoring', icon: Activity },
     { id: 'facilities', label: language === 'zh' ? '急诊与诊所' : language === 'ms' ? 'Hospital & Klinik' : 'Hospitals & A&E', icon: Building2 },
-    { id: 'clinical_kb', label: language === 'zh' ? '规则采集' : language === 'ms' ? 'Penuaian Peraturan' : 'Override Rule Harvesting and Governance', icon: FileCheck },
     { id: 'pdpa_audit', label: language === 'zh' ? '隐私与审计' : language === 'ms' ? 'Audit PDPA' : 'Audit & PDPA', icon: ShieldCheck },
     { id: 'feedback', label: language === 'zh' ? '反馈' : language === 'ms' ? 'Maklum Balas' : 'Customer Feedback', icon: MessageSquareHeart },
-    { id: 'owner_admin', label: language === 'zh' ? '管理工作台' : language === 'ms' ? 'Portal Pemilik' : 'App Owner Workspace', icon: ShieldCheck },
+    { id: 'owner_admin', label: language === 'zh' ? '临床实验室' : language === 'ms' ? 'Makmal Klinikal' : 'App Owner Clinical Lab', icon: FileCheck },
+    { id: 'app_workspace', label: language === 'zh' ? '应用工作区' : language === 'ms' ? 'Ruang Kerja Aplikasi' : 'App Workspace', icon: ShieldCheck },
   ];
 
   // Dynamically filter tabs according to database-backed allowedScreens for active login persona
   const tabs = allowedScreens && allowedScreens.length > 0
     ? ALL_TABS.filter(t => allowedScreens.includes(t.id) && !['family', 'pdpa_audit', 'feedback'].includes(t.id))
     : (isAppOwner 
-        ? ALL_TABS.filter(t => ['owner_admin', 'clinical_kb', 'facilities', 'pdpa_audit'].includes(t.id))
+        ? ALL_TABS.filter(t => ['owner_admin', 'app_workspace', 'facilities', 'pdpa_audit'].includes(t.id))
         : ALL_TABS.filter(t => ['triage'].includes(t.id))
       );
 
@@ -259,13 +259,32 @@ export const Navbar: React.FC<NavbarProps> = ({
                     )}
 
                     {onToggleTriageMode && (
-                      <button
-                        onClick={onToggleTriageMode}
-                        className="w-full text-left px-4 py-2 text-sm text-[#14212B] dark:text-[#F1F5F9] hover:bg-slate-50 dark:hover:bg-[#16232B] flex items-center gap-2"
-                      >
-                        <Activity size={15} className="text-amber-600 dark:text-amber-400" />
-                        Triage Mode: <span className="font-bold">{triageMode === 'agentic' ? 'Agentic' : 'Rule-Based'}</span>
-                      </button>
+                      <div className="w-full text-left px-4 py-2 text-sm text-[#14212B] dark:text-[#F1F5F9] hover:bg-slate-50 dark:hover:bg-[#16232B] flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Activity size={15} className="text-amber-600 dark:text-amber-400" />
+                          <span>Triage Mode</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Rule-Based</span>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={triageMode === 'agentic'}
+                            onClick={onToggleTriageMode}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-amber-500 ${
+                              triageMode === 'agentic' ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
+                            }`}
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                triageMode === 'agentic' ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                          <span className="text-xs font-bold text-amber-600 dark:text-amber-400">Agentic</span>
+                        </div>
+                      </div>
                     )}
 
                     {onToggleDarkMode && (
