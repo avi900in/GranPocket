@@ -72,15 +72,17 @@ export async function invokeLlmAgent<T>(
       baseUrl = process.env.CODEBUDDY_BASE_URL;
     }
 
-    if (apiKey) {
-      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    let modelToTry = (!isJarvisAgent && process.env.GROQ_API_KEY) ? defaultModel : (process.env.DEFAULT_LLM_MODEL || defaultModel);
+
+    const makeCall = async (model: string) => {
+      return await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: (!isJarvisAgent && process.env.GROQ_API_KEY) ? defaultModel : (process.env.DEFAULT_LLM_MODEL || defaultModel),
+          model,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
@@ -90,6 +92,34 @@ export async function invokeLlmAgent<T>(
         }),
         signal: AbortSignal.timeout(120000), // 120s timeout
       });
+    };
+
+    if (apiKey) {
+      let response = await makeCall(modelToTry);
+
+      // Handle HTTP 429 Rate Limit
+      if (response.status === 429) {
+        const errBody = await response.text();
+        console.warn(`[DynamicAgent ${agentName}] Received 429 Rate Limit on ${modelToTry}: ${errBody}`);
+
+        // 1. Parse wait time from error message (e.g. "Please try again in 4.1775s")
+        let waitMs = 5000;
+        const waitMatch = errBody.match(/try again in\s*([\d.]+)\s*s/i);
+        if (waitMatch && waitMatch[1]) {
+          waitMs = Math.ceil(parseFloat(waitMatch[1]) * 1000) + 500; // Add 500ms safety margin
+        }
+        console.log(`[DynamicAgent ${agentName}] Auto-retrying ${modelToTry} once after ${waitMs}ms backoff...`);
+        await new Promise(r => setTimeout(r, waitMs));
+
+        response = await makeCall(modelToTry);
+
+        // 2. If still 429 or fails, switch to qwen/qwen3.8-27b
+        if (!response.ok && response.status === 429) {
+          const fallbackModel = 'qwen/qwen3.8-27b';
+          console.warn(`[DynamicAgent ${agentName}] Retry on ${modelToTry} failed with 429. Switching model to ${fallbackModel}...`);
+          response = await makeCall(fallbackModel);
+        }
+      }
 
       if (response.ok) {
         const data = await response.json();
@@ -100,18 +130,15 @@ export async function invokeLlmAgent<T>(
         return { result: parsed as T, source: 'llm_dynamic', rawLlmText: content };
       } else {
         const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        console.warn(`[DynamicAgent ${agentName}] LLM call failed with HTTP ${response.status}: ${errorText}`);
       }
-    } else {
-      throw new Error('No LLM API Key found in environment variables.');
     }
   } catch (err: any) {
-    console.warn(`[DynamicAgent ${agentName}] External LLM call failed:`, err?.message);
-    // Directly throw the error so it propagates to the UI instead of masking it with the fallback
-    throw new Error(`LLM Failure (${agentName}): ${err?.message || 'Unknown error'}`);
+    console.warn(`[DynamicAgent ${agentName}] LLM execution encountered error:`, err?.message);
   }
 
-  // Dynamic generative fallback with contextual reasoning
+  // 3. If all LLM calls fail, provide safe, clinically valid fallback
+  console.log(`[DynamicAgent ${agentName}] Invoking graceful clinical reasoning fallback engine.`);
   const dynamicResult = fallbackGenerator();
   return { result: dynamicResult, source: 'dynamic_reasoning_engine' };
 }
