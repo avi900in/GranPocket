@@ -148,7 +148,7 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    setStep('initial');
+    setStep('intake');
     setAnswerInput('');
   };
 
@@ -208,8 +208,8 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
     }
     
     const mockQuestions: QuestionStep[] = fetchedQuestions.length ? fetchedQuestions : [
-      { id: 'q1', text: 'How long have you had this symptom?', answerType: 'choice', options: ['Less than a day', '1-3 days', 'More than 3 days'] },
-      { id: 'q2', text: 'Are you experiencing any severe pain?', answerType: 'yes_no' }
+      { id: 'q1', textKey: 'q.duration', text: 'How long have you had this symptom?', answerType: 'choice', options: ['Less than a day', '1-3 days', 'More than 3 days'] },
+      { id: 'q2', textKey: 'q.pain', text: 'Are you experiencing any severe pain?', answerType: 'yes_no' }
     ];
     
     setQuestions(mockQuestions);

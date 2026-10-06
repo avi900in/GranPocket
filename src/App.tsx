@@ -904,8 +904,8 @@ export default function App() {
       }
     }
 
-    // Trigger toast notification
-    showToast('Care Plan and OTC Medications integrated with Scheduler.');
+    // Integrated with Scheduler notification
+    console.log('[Scheduler] Care Plan and OTC Medications integrated with Scheduler.');
     setActiveTab('monitoring');
   };
 

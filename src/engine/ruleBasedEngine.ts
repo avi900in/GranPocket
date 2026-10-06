@@ -1334,8 +1334,8 @@ export function runRuleBasedTriage(input: {
 
   console.log(`[Triage Engine] ====== Starting runTriage() ======`);
   console.log(`[Triage Engine] Ailment Code: ${ailmentCode}`);
-  console.log(`[Triage Engine] Input Text: "${text}"`);
-  console.log(`[Triage Engine] Patient Profile loaded: Age ${person.dob}, Conditions: ${person.conditions?.join(',') || 'None'}`);
+  const conditionNames = person.medicalProfile?.conditions?.map(c => c.name).join(',') || 'None';
+  console.log(`[Triage Engine] Patient Profile loaded: Age ${person.dob}, Conditions: ${conditionNames}`);
 
   const triggeredRules: string[] = [];
   const reasons: string[] = [];
@@ -1390,7 +1390,8 @@ export function runRuleBasedTriage(input: {
 
   // Step 3: Profile Modifiers (e.g. blood thinners with head injury)
   if (ailmentCode) {
-    console.log(`[Triage Engine] Step 3: Checking Profile Modifiers. Reading DB fields (dob: ${person.dob}, pregnancy: ${person.pregnancy}, conditions: ${person.conditions?.join(',') || 'none'})`);
+    const pregnancy = person.medicalProfile?.pregnancyStatus || 'not_pregnant';
+    console.log(`[Triage Engine] Step 3: Checking Profile Modifiers. Reading DB fields (dob: ${person.dob}, pregnancy: ${pregnancy}, conditions: ${conditionNames})`);
     const modifierResult = applyProfileModifiers(severity, person, ailmentCode);
     if (modifierResult.severity !== severity) {
       severity = modifierResult.severity;

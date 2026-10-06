@@ -1018,7 +1018,7 @@ export async function runTriage(input: any): Promise<TriageResult> {
         timeframe: getTimeframe(severity, 'en'),
         whenToWorry: getWhenToWorry(severity, ailment?.code, 'en'),
         disclaimer: 'Agentic Triage Active',
-        contentStatusLabel: 'AI Generated',
+        contentStatusLabel: 'AGENTIC_PREVIEW',
         triggeredRuleIds: res.provenance?.tier1Deterministic ? ['DETERMINISTIC_MATCH'] : [],
         ruleMatches: res.provenance?.tier1Deterministic ? ['DETERMINISTIC_MATCH'] : [],
         agenticConfidence: res.confidenceScore,
@@ -1058,7 +1058,7 @@ export async function runTriage(input: any): Promise<TriageResult> {
   }
 
   fallbackResult.disclaimer = "Agentic Triage Offline - Fallback to Rule-Based Engine";
-  fallbackResult.summary = "Swarm connection failed. Used Rule-Based Fallback: " + (fallbackResult.summary || '');
+  (fallbackResult as any).summary = "Swarm connection failed. Used Rule-Based Fallback: " + ((fallbackResult as any).summary || '');
   return fallbackResult as TriageResult;
 }
 
@@ -1080,12 +1080,12 @@ export async function getQuestionTree(ailmentCode: string, person?: Person | nul
   
   // Hard fallback if backend offline
   return [
-    { id: "q1", text: "How long have you been experiencing this?", answerType: "choice", options: ["Less than 24 hours", "1-3 days", "More than 3 days"] },
-    { id: "q2", text: "Is the pain or discomfort severe?", answerType: "yes_no" }
+    { id: "q1", textKey: "q.duration", text: "How long have you been experiencing this?", answerType: "choice", options: ["Less than 24 hours", "1-3 days", "More than 3 days"] },
+    { id: "q2", textKey: "q.pain", text: "Is the pain or discomfort severe?", answerType: "yes_no" }
   ];
 }
 
-export function getAgeBand(dob: string): AgeBand { return "ADULT"; }
+export function getAgeBand(dob: string): AgeBand { return "adult"; }
 export function getAgeDisplay(dob: string, lang: Language = "en"): string {
   const birthDate = new Date(dob);
   const now = new Date();

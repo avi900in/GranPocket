@@ -453,6 +453,8 @@ export interface KBChangeProposal {
   isEmergencyEscalation?: boolean;
 }
 
+export type KbProposal = KBChangeProposal;
+
 // ===== Audit Event (SRS PRIV-04) =====
 export interface AuditEvent {
   id: string;

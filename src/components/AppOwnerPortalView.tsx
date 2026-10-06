@@ -110,7 +110,7 @@ interface AppOwnerPortalViewProps {
   onResetRolePermissions?: () => Promise<boolean>;
   menuMode?: 'clinical_lab' | 'app_workspace';
   proposals?: KbProposal[];
-  onApproveProposal?: (id: string, overrides: any) => void;
+  onApproveProposal?: (id: string, doctorNameOrOverrides?: any, mcr?: any) => void;
   onDeleteProposal?: (id: string) => void;
   onMoveToPendingProposal?: (id: string) => void;
   onRefreshProposals?: () => Promise<void>;
@@ -129,7 +129,8 @@ type SubTab =
   | 'guardrails'
   | 'triage_medications'
   | 'insurance' 
-  | 'wearables';
+  | 'wearables'
+  | 'jarvis_arh';
 
 export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
   currentUser,
@@ -1548,10 +1549,13 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
       {activeSubTab === 'harvesting' && (
         <ClinicalKbConsoleView
           proposals={proposals}
-          onApproveProposal={onApproveProposal!}
+          onApproveProposal={onApproveProposal as any}
           onDeleteProposal={onDeleteProposal!}
           onMoveToPendingProposal={onMoveToPendingProposal!}
           onRefreshProposals={onRefreshProposals!}
+          environmentMode="production"
+          onToggleEnvironmentMode={() => {}}
+          language={language}
         />
       )}
 
@@ -2766,12 +2770,12 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                             <button 
                               onClick={() => {
                                 setEditingUxRuleId(rule.ruleId);
-                                if (!uxMappings[rule.ruleId]) {
-                                  setUxMappings(prev => ({
-                                    ...prev,
-                                    [rule.ruleId]: { action: rule.then?.careTierKey || '', meds: '[]', partners: '[]' }
-                                  }));
-                                }
+                                  if (!uxMappings[rule.ruleId]) {
+                                    setUxMappings(prev => ({
+                                      ...prev,
+                                      [rule.ruleId]: { action: (rule as any).then?.careTierKey || rule.careTierKey || '', meds: '[]', partners: '[]' }
+                                    }));
+                                  }
                               }} 
                               className="text-[10px] text-teal-600 hover:underline font-bold"
                             >

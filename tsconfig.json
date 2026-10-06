@@ -18,6 +18,11 @@
     "verbatimModuleSyntax": false
   },
   "include": ["src"],
-  "exclude": ["node_modules", "src/legacy_template"],
+  "exclude": [
+    "node_modules", 
+    "src/legacy_template", 
+    "src/components/TriageFlowView_old.tsx", 
+    "src/engine/triageEngine_old.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

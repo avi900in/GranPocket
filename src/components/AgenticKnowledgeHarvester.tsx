@@ -3,7 +3,7 @@ import { BrainCircuit, UploadCloud, Link as LinkIcon, Database, Check, X, FileTe
 import type { KbProposal } from '../types';
 
 interface AgenticKnowledgeHarvesterProps {
-  onApproveProposal: (id: string, overrides: any) => void;
+  onApproveProposal: (id: string, doctorNameOrOverrides?: any, mcr?: any) => void;
   onDeleteProposal: (id: string) => void;
 }
 
@@ -207,7 +207,7 @@ export const AgenticKnowledgeHarvester: React.FC<AgenticKnowledgeHarvesterProps>
                       <FileText className="w-4 h-4 text-emerald-600" />
                       {p.title}
                     </h4>
-                    <p className="text-xs text-slate-500 mt-1">{p.description}</p>
+                    <p className="text-xs text-slate-500 mt-1">{p.rationale || p.proposedChanges}</p>
                   </div>
                   <span className="px-2 py-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-lg uppercase tracking-wider">
                     Pending
