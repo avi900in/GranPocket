@@ -1009,15 +1009,63 @@ app.post("/api/triage/questions", async (req, res) => {
   }
 });
 
+// Get all deterministic triage decisions from triage_decisions table
+app.get("/api/triage/decisions", (req, res) => {
+  try {
+    const decisions = db.getAllTriageDecisions();
+    res.json({ success: true, decisions });
+  } catch (error: any) {
+    console.error("[Triage Decisions All API] Error:", error);
+    res.status(500).json({ success: false, error: error.message, decisions: [] });
+  }
+});
+
+// Save / Update a deterministic triage decision in triage_decisions table
+app.post("/api/triage/decisions", (req, res) => {
+  try {
+    const body = req.body;
+    if (!body || !body.ailmentCode || !body.severity) {
+      return res.status(400).json({ success: false, error: "Missing ailmentCode or severity" });
+    }
+    const success = db.saveTriageDecision(body);
+    res.json({ success, message: "Triage decision saved to SQLite" });
+  } catch (error: any) {
+    console.error("[Triage Decision Save API] Error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get deterministic triage decision from triage_decisions table (OTC meds, home care, telemed)
+app.get("/api/triage/decision", (req, res) => {
+  try {
+    const { ailmentCode, severity } = req.query;
+    if (!ailmentCode || !severity) {
+      return res.status(400).json({ error: "Missing ailmentCode or severity parameter" });
+    }
+    const decision = db.getTriageDecision(String(ailmentCode), String(severity));
+    res.json({ success: true, decision });
+  } catch (error: any) {
+    console.error("[Triage Decision API] Error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
 // Dynamic @vision_agent (Image-to-Text Perception)
 app.post("/api/agentic/vision", async (req, res) => {
   try {
-    const { imageBase64 } = req.body;
+    const { imageBase64, imageContext } = req.body;
     if (!imageBase64) {
       return res.status(400).json({ error: "Missing imageBase64 payload" });
     }
-    const descriptors = await executeDynamicVisionAgent(imageBase64);
-    res.json({ success: true, descriptors });
+    const visionResult = await executeDynamicVisionAgent(imageBase64, imageContext);
+    res.json({
+      success: true,
+      descriptors: visionResult.descriptors,
+      detectedAilmentCode: visionResult.detectedAilmentCode,
+      suspectedCondition: visionResult.suspectedCondition,
+      leadingQuestions: visionResult.leadingQuestions
+    });
   } catch (error: any) {
     console.error("[Vision Agent API] Error:", error);
     res.status(500).json({ success: false, error: error.message, descriptors: [] });
@@ -1229,6 +1277,20 @@ app.get("/api/db/facilities", (req, res) => {
   try {
     const facilities = db.getAllFacilities();
     res.json({ success: true, facilities });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/db/facilities", (req, res) => {
+  try {
+    const facility = req.body;
+    if (!facility || !facility.name || !facility.address) {
+      return res.status(400).json({ success: false, error: "Missing required fields: name and address" });
+    }
+    db.saveFacility(facility);
+    const all = db.getAllFacilities();
+    res.json({ success: true, message: "Facility stored into SQLite database", facilities: all });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

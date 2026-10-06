@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   MessageSquareHeart, 
   Star, 
@@ -27,6 +27,12 @@ export const CustomerFeedbackView: React.FC<CustomerFeedbackViewProps> = ({
   const [feedbackComments, setFeedbackComments] = useState<string>('');
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [feedbackSuccessToast, setFeedbackSuccessToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedPerson?.name) {
+      setFeedbackMemberName(selectedPerson.name);
+    }
+  }, [selectedPerson]);
 
   const handleFeedbackSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

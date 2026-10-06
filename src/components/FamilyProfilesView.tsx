@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   Plus, 
@@ -152,6 +152,12 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
   const [feedbackComments, setFeedbackComments] = useState<string>('');
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [feedbackSuccessToast, setFeedbackSuccessToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedPerson?.name) {
+      setFeedbackMemberName(selectedPerson.name);
+    }
+  }, [selectedPerson]);
 
   const handleFeedbackSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -415,6 +421,16 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
               <span>Read Only Profile</span>
             </span>
           )}
+
+          <button
+            type="button"
+            onClick={() => setShowFeedbackModal(true)}
+            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-black shadow transition-all min-h-[40px]"
+            title="Submit Feedback for Dr. Evelyn Lim (App Owner)"
+          >
+            <MessageSquareHeart size={14} />
+            <span>Give Feedback</span>
+          </button>
 
           {onResetDemoData && (
             <button
@@ -879,7 +895,7 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
 
             <form onSubmit={handleSaveProfileEdit} className="space-y-4">
               {/* Basic Demographics */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-700">Full Name</label>
                   <input
@@ -899,6 +915,18 @@ export const FamilyProfilesView: React.FC<FamilyProfilesViewProps> = ({
                     onChange={e => setEditDob(e.target.value)}
                     className="w-full mt-1 p-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:border-teal-500"
                   />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Gender / Sex</label>
+                  <select
+                    value={editSex}
+                    onChange={e => setEditSex(e.target.value as 'male' | 'female' | 'other')}
+                    className="w-full mt-1 p-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:border-teal-500"
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-700">Relationship Label</label>

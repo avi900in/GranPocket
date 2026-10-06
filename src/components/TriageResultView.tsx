@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { AlertOctagon, RefreshCw, PhoneCall, ShieldCheck, Clock, MapPin, Heart, ChevronRight, Bot, Info, Activity, Pill, HeartPulse, Video, CalendarPlus, Share2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { AlertOctagon, RefreshCw, PhoneCall, ShieldCheck, Clock, MapPin, Heart, ChevronRight, Bot, Info, Activity, Pill, HeartPulse, Video, CalendarPlus, Share2, Building2 } from 'lucide-react';
 import type { TriageResult, Person, Address, EmergencyContact, Language, Ailment } from '../types';
+import { findNearestFacilities } from '../engine/singaporeData';
+import { getAgeBand } from '../engine/ruleBasedEngine';
 
 interface TriageResultViewProps {
   result: TriageResult;
@@ -9,6 +11,7 @@ interface TriageResultViewProps {
   emergencyContacts: EmergencyContact[];
   language: Language;
   ailment?: Ailment;
+  triageMode?: 'rule-based' | 'agentic';
   onReset: () => void;
   onOpenSos: () => void;
   onCreateMonitoringPlan: () => void;
@@ -23,12 +26,49 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
   emergencyContacts,
   language,
   ailment,
+  triageMode,
   onReset,
   onOpenSos,
   onOpenFacilities,
   onCreateMonitoringPlan
 }) => {
   const [showParamedicCard, setShowParamedicCard] = useState(false);
+  const [resolvedLat, setResolvedLat] = useState(address?.lat || 1.3325);
+  const [resolvedLng, setResolvedLng] = useState(address?.lng || 103.8475);
+
+  const isPediatric = person?.dob ? (new Date().getFullYear() - new Date(person.dob).getFullYear() < 16) : false;
+
+  useEffect(() => {
+    let active = true;
+    const geocode = async () => {
+      const cleanPostal = address?.postalCode?.replace(/[^0-9]/g, '');
+      if (cleanPostal && cleanPostal.length === 6) {
+        try {
+          const resp = await fetch(
+            `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${cleanPostal}&returnGeom=Y&getAddrDetails=Y`
+          );
+          if (resp.ok) {
+            const json = await resp.json();
+            if (json.results && json.results.length > 0 && active) {
+              const lat = parseFloat(json.results[0].LATITUDE);
+              const lng = parseFloat(json.results[0].LONGITUDE);
+              if (!isNaN(lat) && !isNaN(lng)) {
+                setResolvedLat(lat);
+                setResolvedLng(lng);
+              }
+            }
+          }
+        } catch {}
+      }
+    };
+    geocode();
+    return () => { active = false; };
+  }, [address?.postalCode]);
+
+  const nearestFacilities = findNearestFacilities(resolvedLat, resolvedLng, {
+    edOnly: result.severity === 'RED',
+    pediatricOnly: isPediatric,
+  });
   // Severity-based styling config
   const severityConfig = {
     RED: {
@@ -119,7 +159,7 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
         </div>
         
         <h2 className="text-3xl font-extrabold tracking-tight mb-2 relative z-10">
-          {result.deterministicAction || result.actionText}
+          {result.deterministicAction || result.action}
         </h2>
         <p className="text-white/80 font-medium max-w-sm relative z-10 mb-6">
           For {person.name}
@@ -153,9 +193,9 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
           <p className="text-xl font-extrabold text-gray-900 mb-6">{result.timeframe}</p>
           
           <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100">
-            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Agentic Summary</h4>
+            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Clinical Care Assessment</h4>
             <p className="text-gray-700 leading-relaxed font-medium">
-              {result.summary}
+              {(result as any).summary || result.action}
             </p>
           </div>
         </div>
@@ -168,20 +208,37 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
               Clinical Care Plan
             </h3>
 
-            {result.otcMedications && result.otcMedications.length > 0 && (
-              <div className="mb-5">
-                <h4 className="text-sm font-bold text-gray-500 flex items-center gap-2 mb-2">
-                  <Pill className="w-4 h-4" /> OTC Medications
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {result.otcMedications.map((med, i) => (
-                    <span key={i} className="px-3 py-1.5 bg-blue-50 text-blue-700 text-sm font-semibold rounded-lg border border-blue-100">
-                      {med}
-                    </span>
-                  ))}
+            {result.otcMedications && result.otcMedications.length > 0 && (() => {
+              const ageBand = person?.dob ? getAgeBand(person.dob) : 'adult';
+              const doseMap = result.medicationDoseByAge || {};
+              const targetDose = doseMap[ageBand] || (['toddler'].includes(ageBand) ? '2.5ml' : ['child'].includes(ageBand) ? '5ml' : ['adolescent', 'adult', 'elderly'].includes(ageBand) ? '10ml' : 'N/A');
+              const frequency = result.medicationFrequency;
+
+              return (
+                <div className="mb-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-bold text-gray-500 flex items-center gap-2">
+                      <Pill className="w-4 h-4" /> Recommended OTC Medications
+                    </h4>
+                    {frequency && frequency !== 'N/A' && (
+                      <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-100">
+                        {frequency}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2.5">
+                    {result.otcMedications.map((med, i) => (
+                      <div key={i} className="px-3.5 py-2 bg-blue-50/80 text-blue-900 text-xs font-semibold rounded-xl border border-blue-200/80 shadow-xs flex items-center gap-2">
+                        <span className="font-bold text-blue-950">{med}</span>
+                        <span className="text-blue-600 font-mono bg-blue-100/70 px-2 py-0.5 rounded-md text-[11px]">
+                          Dose: {targetDose}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {result.homeCare && result.homeCare.length > 0 && (
               <div className="mb-5">
@@ -196,34 +253,104 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
               </div>
             )}
             
-            <button
-              onClick={onCreateMonitoringPlan}
-              className="mt-2 w-full py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl transition-all flex items-center justify-center gap-2"
-            >
-              <CalendarPlus className="w-5 h-5" />
-              Schedule Meds & Monitoring
-            </button>
+            {/* Check-Back Reminder & Monitoring Plan Card (YELLOW & GREEN) placed right below medicines/care */}
+            {(result.severity === 'YELLOW' || result.severity === 'GREEN') && (
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/80 rounded-2xl p-4 mt-2 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="font-bold text-amber-900 text-sm flex items-center gap-2">
+                    <Heart className="w-4 h-4 text-amber-600" />
+                    <span>Check-Back Reminder & Monitoring</span>
+                  </div>
+                  <p className="text-xs text-amber-800/90 leading-relaxed">
+                    Grandma noted down this recommendation. Set an automatic check-back reminder to monitor symptoms over the next 24–72 hours.
+                  </p>
+                </div>
+                <button
+                  onClick={onCreateMonitoringPlan}
+                  className="w-full sm:w-auto px-5 py-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 shrink-0 active:scale-95"
+                >
+                  <CalendarPlus className="w-4 h-4" />
+                  <span>Set Check-Back Reminder</span>
+                </button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Telemedicine Suggestion */}
-        {result.telemedPartners && result.telemedPartners.length > 0 && (
+        {/* Yellow / Orange / Red: Nearest Singapore Medical Facilities */}
+        {nearestFacilities.length > 0 && result.severity !== 'GREEN' && (
           <div className="bg-white rounded-3xl shadow-lg p-6 mb-4 border border-gray-100">
-            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-              <Video className="w-5 h-5 text-purple-500" />
-              Recommended Telemedicine
-            </h3>
-            <div className="flex flex-wrap gap-3">
-              {result.telemedPartners.map((partner, i) => (
-                <button 
-                  key={i} 
-                  onClick={() => handleTelemedClick(partner)}
-                  className="flex-1 py-3 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-xl transition-all border border-purple-200"
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-teal-600" />
+                <span>Nearest Medical Facilities / Clinics</span>
+              </h3>
+              <span className="text-xs text-gray-500 font-medium">
+                {address?.postalCode ? `Near ${address.postalCode}` : 'Singapore'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              {nearestFacilities.slice(0, 2).map(f => (
+                <div
+                  key={f.id}
+                  className="p-4 rounded-2xl border border-gray-100 bg-slate-50/70 hover:bg-slate-50 transition-colors space-y-1.5"
                 >
-                  Consult {partner}
-                </button>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+                      <Building2 className="w-4 h-4 text-teal-600 shrink-0" />
+                      <span>{f.name}</span>
+                    </div>
+                    {f.distance !== undefined && (
+                      <span className="text-xs font-mono font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-100 shrink-0">
+                        {f.distance.toFixed(1)} km
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    {f.address} {f.hours && `• ${f.hours}`}
+                  </div>
+                  {f.eta && (
+                    <div className="text-xs font-semibold text-amber-700 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Estimated travel: ~{f.eta}</span>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
+
+            {onOpenFacilities && (
+              <button
+                onClick={onOpenFacilities}
+                className="mt-3 w-full py-2.5 text-xs text-teal-700 hover:text-teal-800 font-bold bg-teal-50 hover:bg-teal-100 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+              >
+                <span>View Full Map & All Clinic Options</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Check-Back Reminder & Monitoring Plan Card fallback when no medications/care plan is displayed */}
+        {(!result.otcMedications && !result.homeCare) && (result.severity === 'YELLOW' || result.severity === 'GREEN') && (
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/80 rounded-3xl p-5 mb-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="font-bold text-amber-900 text-sm flex items-center gap-2">
+                <Heart className="w-4 h-4 text-amber-600" />
+                <span>Check-Back Reminder & Monitoring</span>
+              </div>
+              <p className="text-xs text-amber-800/90 leading-relaxed">
+                Grandma noted down this recommendation. Set an automatic check-back reminder to monitor symptoms over the next 24–72 hours.
+              </p>
+            </div>
+            <button
+              onClick={onCreateMonitoringPlan}
+              className="w-full sm:w-auto px-5 py-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 shrink-0 active:scale-95"
+            >
+              <CalendarPlus className="w-4 h-4" />
+              <span>Set Check-Back Reminder</span>
+            </button>
           </div>
         )}
 
@@ -277,36 +404,72 @@ export const TriageResultView: React.FC<TriageResultViewProps> = ({
           </button>
         </div>
 
-        {/* AI Transparency Panel */}
-        <div className="mt-8 mb-16 p-4 rounded-2xl bg-blue-50/50 border border-blue-100 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-5">
-            <Bot size={80} />
-          </div>
-          <div className="flex items-center gap-2 mb-3 relative z-10">
-            <div className="bg-blue-100 text-blue-600 p-1.5 rounded-lg">
-              <Bot size={18} />
-            </div>
-            <h4 className="font-bold text-blue-900">AI-Assisted Triage</h4>
-            {result.agenticConfidence && (
-              <div className="ml-auto flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-full border border-blue-200">
-                <Activity size={14} className="text-blue-500" />
-                <span className="text-xs font-bold text-blue-700">{result.agenticConfidence}% Match</span>
+        {/* Clinical Transparency Panel (Rule-Based vs. AI-Assisted) */}
+        {(() => {
+          const isAgentic = triageMode === 'agentic' || Boolean(result.agenticConfidence || result.agenticProvenance);
+
+          if (!isAgentic) {
+            return (
+              <div className="mt-8 mb-16 p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-5">
+                  <ShieldCheck size={80} />
+                </div>
+                <div className="flex items-center gap-2 mb-3 relative z-10">
+                  <div className="bg-emerald-100 text-emerald-700 p-1.5 rounded-lg">
+                    <ShieldCheck size={18} />
+                  </div>
+                  <h4 className="font-bold text-emerald-900">Deterministic Rule-Based Triage</h4>
+                  <div className="ml-auto flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-full border border-emerald-200">
+                    <Activity size={14} className="text-emerald-600" />
+                    <span className="text-xs font-bold text-emerald-800">100% Deterministic</span>
+                  </div>
+                </div>
+                
+                <div className="space-y-2 relative z-10 text-sm text-emerald-900">
+                  <p className="flex items-start gap-2">
+                    <Info size={14} className="mt-1 shrink-0 text-emerald-600" />
+                    <span>Evaluated strictly against <strong>Singapore MOH CPG guidelines & hardcoded clinical rules</strong> with zero generative LLM hallucinations.</span>
+                  </p>
+                  <p className="flex items-start gap-2 text-xs opacity-85 pl-6">
+                    Red-flag conditions, profile modifiers, and structured triage trees governed the care tier and urgency timeframe.
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
-          
-          <div className="space-y-2 relative z-10 text-sm text-blue-800">
-            <p className="flex items-start gap-2">
-              <Info size={14} className="mt-1 shrink-0 text-blue-500" />
-              <span>AI components were dynamically used for <strong>symptom analysis, ailment mapping, and triage severity assessment.</strong></span>
-            </p>
-            {result.agenticProvenance?.tier3ExpertDoctorAgent && (
-              <p className="flex items-start gap-2 text-xs opacity-80 pl-6">
-                Expert Doctor Agent ({result.agenticProvenance.tier3ExpertDoctorAgent}) was consulted to verify clinical safety.
-              </p>
-            )}
-          </div>
-        </div>
+            );
+          }
+
+          return (
+            <div className="mt-8 mb-16 p-4 rounded-2xl bg-blue-50/50 border border-blue-100 relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4 opacity-5">
+                <Bot size={80} />
+              </div>
+              <div className="flex items-center gap-2 mb-3 relative z-10">
+                <div className="bg-blue-100 text-blue-600 p-1.5 rounded-lg">
+                  <Bot size={18} />
+                </div>
+                <h4 className="font-bold text-blue-900">AI-Assisted Triage</h4>
+                {result.agenticConfidence && (
+                  <div className="ml-auto flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-full border border-blue-200">
+                    <Activity size={14} className="text-blue-500" />
+                    <span className="text-xs font-bold text-blue-700">{result.agenticConfidence}% Match</span>
+                  </div>
+                )}
+              </div>
+              
+              <div className="space-y-2 relative z-10 text-sm text-blue-800">
+                <p className="flex items-start gap-2">
+                  <Info size={14} className="mt-1 shrink-0 text-blue-500" />
+                  <span>AI components were dynamically used for <strong>symptom analysis, ailment mapping, and triage severity assessment.</strong></span>
+                </p>
+                {result.agenticProvenance?.tier3ExpertDoctorAgent && (
+                  <p className="flex items-start gap-2 text-xs opacity-80 pl-6">
+                    Expert Doctor Agent ({result.agenticProvenance.tier3ExpertDoctorAgent}) was consulted to verify clinical safety.
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
 
 

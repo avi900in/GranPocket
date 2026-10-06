@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Heart, 
   Clock, 
@@ -40,8 +40,27 @@ export const HomeMonitoringView: React.FC<HomeMonitoringViewProps> = ({
   language,
   onRemoveAilment,
 }) => {
-  const [selectedPlanId, setSelectedPlanId] = useState<string>(plans[0]?.id || '');
-  const currentPlan = plans.find(p => p.id === selectedPlanId) || plans[0];
+  // Synchronize plan when selectedPerson changes or when plans list changes
+  const [selectedPlanId, setSelectedPlanId] = useState<string>(() => {
+    const matchingPersonPlan = plans.find(p => p.subjectId === selectedPerson?.id);
+    return matchingPersonPlan?.id || plans[0]?.id || '';
+  });
+
+  useEffect(() => {
+    if (selectedPerson) {
+      const match = plans.find(p => p.subjectId === selectedPerson.id);
+      if (match) {
+        setSelectedPlanId(match.id);
+        return;
+      }
+    }
+    // If current selected plan doesn't exist anymore, fallback to first plan
+    if (!plans.some(p => p.id === selectedPlanId) && plans.length > 0) {
+      setSelectedPlanId(plans[0].id);
+    }
+  }, [selectedPerson?.id, plans]);
+
+  const currentPlan = plans.find(p => p.id === selectedPlanId) || (selectedPerson ? plans.find(p => p.subjectId === selectedPerson.id) : plans[0]);
   const [planResolvedMessage, setPlanResolvedMessage] = useState<string | null>(null);
 
   // Quick Check-in Response Form
@@ -50,18 +69,20 @@ export const HomeMonitoringView: React.FC<HomeMonitoringViewProps> = ({
   const [painInput, setPainInput] = useState<number>(4);
   const [checkInNotes, setCheckInNotes] = useState('');
 
-  const targetPerson = members.find(m => m.id === currentPlan?.subjectId) || selectedPerson;
+  // Target person must strictly belong to the current plan's subject
+  const targetPerson = (currentPlan ? members.find(m => m.id === currentPlan.subjectId) : null) || selectedPerson;
   const isOrangeCase = currentPlan?.initialSeverity === 'ORANGE' || currentPlan?.checkIns.some(ci => ci.escalatedToSeverity === 'ORANGE');
 
   const handleResolveAilment = () => {
     if (!currentPlan) return;
+    const planSubject = members.find(m => m.id === currentPlan.subjectId) || targetPerson;
     const completedPlan: CheckBackPlan = {
       ...currentPlan,
       status: 'completed',
     };
     onUpdatePlan(completedPlan);
-    onRemoveAilment?.(targetPerson.id);
-    setPlanResolvedMessage(`Ailment resolved! Monitoring plan for ${targetPerson.name} has been closed and removed from active cases.`);
+    onRemoveAilment?.(planSubject.id);
+    setPlanResolvedMessage(`Ailment resolved! Monitoring plan for ${planSubject.name} has been closed and removed from active cases.`);
     setTimeout(() => setPlanResolvedMessage(null), 5000);
   };
 
@@ -178,10 +199,10 @@ export const HomeMonitoringView: React.FC<HomeMonitoringViewProps> = ({
           <button
             onClick={handleResolveAilment}
             className="px-4 py-2 rounded-full bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md shadow-amber-900/20 active:scale-95 transition-all flex items-center gap-1.5 shrink-0"
-            title="Mark this ailment as resolved and complete active monitoring plan"
+            title={`Mark this ailment as resolved and complete active monitoring plan for ${targetPerson.name}`}
           >
             <CheckCircle2 size={15} />
-            <span>Resolve & Remove Ailment</span>
+            <span>Resolve & Remove Ailment for {targetPerson.name}</span>
           </button>
         </div>
       )}

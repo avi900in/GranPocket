@@ -30,6 +30,7 @@ import {
 } from './data/mockData';
 import { lookupSingaporePostalCode } from './engine/singaporeData';
 import { setDynamicCustomRules } from './engine/triageEngine';
+import { getAgeBand } from './engine/ruleBasedEngine';
 import {
   fetchRulesFromDb,
   saveRuleToDb,
@@ -45,7 +46,9 @@ import {
   acknowledgeCaregiverAlertInDb,
   resolvePersonAilmentInDb,
   saveTriageAssessmentToDb,
-  type CaregiverAlertEntry
+  type CaregiverAlertEntry,
+  fetchFacilitiesFromDb,
+  saveFacilityToDb
 } from './services/dbService';
 
 import { Navbar } from './components/Navbar';
@@ -377,7 +380,7 @@ export default function App() {
     await deleteRuleFromDb(ruleId); // Delete from SQLite
   };
 
-  // App Owner Hospital & Facility Registry
+  // App Owner Hospital & Facility Registry (Backed by SQLite database)
   const [allFacilities, setAllFacilities] = useState<HospitalFacility[]>(() => {
     try {
       const saved = localStorage.getItem('granpocket_custom_facilities');
@@ -394,6 +397,26 @@ export default function App() {
     }
   });
 
+  // Load facilities from SQLite database
+  useEffect(() => {
+    const loadDbFacilities = async () => {
+      try {
+        const dbFacs = await fetchFacilitiesFromDb();
+        if (dbFacs && dbFacs.length > 0) {
+          const map = new Map<string, HospitalFacility>();
+          // Base fallback
+          SINGAPORE_FACILITIES.forEach(f => map.set(f.id, f));
+          // SQLite records override / append
+          dbFacs.forEach(f => map.set(f.id, f));
+          setAllFacilities(Array.from(map.values()));
+        }
+      } catch (err) {
+        console.warn('Failed to load facilities from SQLite:', err);
+      }
+    };
+    loadDbFacilities();
+  }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem('granpocket_custom_facilities', JSON.stringify(allFacilities));
@@ -402,7 +425,7 @@ export default function App() {
     }
   }, [allFacilities]);
 
-  const handleAddFacility = (fac: HospitalFacility) => {
+  const handleAddFacility = async (fac: HospitalFacility) => {
     setAllFacilities(prev => [fac, ...prev]);
     const newAudit: AuditEvent = {
       id: `audit-fac-${Date.now()}`,
@@ -414,6 +437,9 @@ export default function App() {
       details: `24h ED: ${fac.hasED} • Phone: ${fac.phone} • Lat/Lng: ${fac.lat}/${fac.lng}`,
     };
     setAuditLogs(prev => [newAudit, ...prev]);
+
+    // Persist to SQLite database table `facilities`
+    await saveFacilityToDb(fac);
   };
 
   // Role-Based Access Control State (Backed by SQLite Database)
@@ -853,18 +879,23 @@ export default function App() {
     if (currentResult.otcMedications && currentResult.otcMedications.length > 0) {
       const updatedPerson = { ...selectedPerson };
       if (!updatedPerson.medicalProfile) {
-        updatedPerson.medicalProfile = { conditions: [], medications: [], allergies: [] };
+        updatedPerson.medicalProfile = { conditions: [], medications: [], allergies: [], intolerances: [], vaccinations: [] };
       }
       
       const existingMeds = updatedPerson.medicalProfile.medications || [];
+      const ageBand = getAgeBand(selectedPerson.dob);
+      const doseMap = currentResult.medicationDoseByAge || {};
+      const targetDose = doseMap[ageBand] || (['toddler'].includes(ageBand) ? '2.5ml' : ['child'].includes(ageBand) ? '5ml' : ['adolescent', 'adult', 'elderly'].includes(ageBand) ? '10ml' : 'N/A');
+      const medFrequency = currentResult.medicationFrequency || 'As needed (PRN)';
+      
       const newMedsToAdd = currentResult.otcMedications.filter(
         newMed => !existingMeds.some(m => m.name.toLowerCase() === newMed.toLowerCase())
       ).map(med => ({
         id: `med-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         name: med,
-        dose: 'As directed',
-        frequency: 'As needed (PRN)',
-        minIntervalHours: 4, // Default safety interval for OTC
+        dose: targetDose,
+        frequency: medFrequency,
+        minIntervalHours: medFrequency.includes('6 hours') ? 6 : medFrequency.includes('3 times') ? 8 : 4,
       }));
 
       if (newMedsToAdd.length > 0) {
@@ -1506,6 +1537,7 @@ export default function App() {
                   emergencyContacts={household.emergencyContacts}
                   language={language}
                   ailment={currentAilment}
+                  triageMode={triageMode}
                   onReset={() => {
                     setCurrentResult(null);
                     setTriageStep('select_patient');

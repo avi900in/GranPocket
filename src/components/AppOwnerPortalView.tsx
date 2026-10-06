@@ -51,7 +51,10 @@ import {
   ThumbsUp,
   CheckCircle,
   ShieldAlert,
-  BrainCircuit
+  BrainCircuit,
+  Pill,
+  Save,
+  Edit2
 } from 'lucide-react';
 import type {
   Person,
@@ -79,8 +82,13 @@ import { HelperInfoButton } from './HelperInfoButton';
 import {
   fetchCustomerFeedback,
   fetchKeyStatistics,
+  fetchGuardrailsFromDb,
+  updateGuardrailsInDb,
+  fetchAllTriageDecisionsFromDb,
+  saveTriageDecisionToDb,
   type CustomerFeedback,
-  type KeySystemStatistics
+  type KeySystemStatistics,
+  type GuardrailSettings
 } from '../services/dbService';
 
 interface AppOwnerPortalViewProps {
@@ -117,7 +125,9 @@ type SubTab =
   | 'feedback'
   | 'hospitals' 
   | 'bluetooth' 
-  | 'weather' 
+  | 'weather'
+  | 'guardrails'
+  | 'triage_medications'
   | 'insurance' 
   | 'wearables';
 
@@ -211,9 +221,172 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
     loadStatsAndFeedback();
   }, []);
 
+  // Auto-refresh when entering statistics or feedback tabs
   useEffect(() => {
     if (activeSubTab === 'statistics' || activeSubTab === 'feedback') {
       loadStatsAndFeedback();
+    }
+  }, [activeSubTab]);
+
+  // ==========================================
+  // CLINICAL GUARDRAILS STATE (Spec §6)
+  // ==========================================
+  const [confidenceFloor, setConfidenceFloor] = useState<number>(80);
+  const [allergyHardStop, setAllergyHardStop] = useState<boolean>(true);
+  const [ageHardStop, setAgeHardStop] = useState<boolean>(true);
+  const [stalenessWindowDays, setStalenessWindowDays] = useState<number>(90);
+  const [maxRetryCount, setMaxRetryCount] = useState<number>(2);
+  const [isSavingGuardrails, setIsSavingGuardrails] = useState<boolean>(false);
+
+  const loadGuardrails = async () => {
+    try {
+      const cfg = await fetchGuardrailsFromDb();
+      if (cfg) {
+        setConfidenceFloor(cfg.confidenceFloorPercent);
+        setAllergyHardStop(cfg.enableAllergyHardStop);
+        setAgeHardStop(cfg.enableAgeHardStop);
+        setStalenessWindowDays(cfg.freshnessWindowDays);
+        setMaxRetryCount(cfg.maxChallengeRetries);
+      }
+    } catch (e) {
+      console.warn('Error loading guardrails:', e);
+    }
+  };
+
+  const handleSaveGuardrails = async () => {
+    setIsSavingGuardrails(true);
+    try {
+      const ok = await updateGuardrailsInDb({
+        confidenceFloorPercent: confidenceFloor,
+        enableAllergyHardStop: allergyHardStop,
+        enableAgeHardStop: ageHardStop,
+        freshnessWindowDays: stalenessWindowDays,
+        maxChallengeRetries: maxRetryCount,
+      });
+      if (ok) {
+        showToast('Clinical Guardrails updated successfully in SQLite database.');
+      } else {
+        showToast('Failed to update clinical guardrails.');
+      }
+    } catch (e) {
+      showToast('Error saving guardrails.');
+    } finally {
+      setIsSavingGuardrails(false);
+    }
+  };
+
+  // ==========================================
+  // TRIAGE DECISIONS & MEDICATIONS STATE
+  // ==========================================
+  const [triageDecisionsList, setTriageDecisionsList] = useState<any[]>([]);
+  const [isLoadingDecisions, setIsLoadingDecisions] = useState<boolean>(false);
+  const [selectedDecisionId, setSelectedDecisionId] = useState<number | null>(null);
+  const [isEditingDecision, setIsEditingDecision] = useState<boolean>(false);
+  const [decisionFilterAilment, setDecisionFilterAilment] = useState<string>('ALL');
+
+  // Form state for creating / editing decision
+  const [formAilmentCode, setFormAilmentCode] = useState<string>('fever');
+  const [formSeverity, setFormSeverity] = useState<string>('GREEN');
+  const [formAction, setFormAction] = useState<string>('Home Care');
+  const [formOtcMeds, setFormOtcMeds] = useState<string>('');
+  const [formHomeCare, setFormHomeCare] = useState<string>('');
+  const [formTelemed, setFormTelemed] = useState<string>('');
+  const [formDoseToddler, setFormDoseToddler] = useState<string>('2.5ml');
+  const [formDoseChild, setFormDoseChild] = useState<string>('5ml');
+  const [formDoseAdult, setFormDoseAdult] = useState<string>('10ml');
+  const [formFrequency, setFormFrequency] = useState<string>('Once every 6 hours');
+  const [isSavingDecision, setIsSavingDecision] = useState<boolean>(false);
+
+  const loadTriageDecisions = async () => {
+    setIsLoadingDecisions(true);
+    try {
+      const data = await fetchAllTriageDecisionsFromDb();
+      setTriageDecisionsList(data);
+    } catch (e) {
+      console.warn('Error loading triage decisions:', e);
+    } finally {
+      setIsLoadingDecisions(false);
+    }
+  };
+
+  const handleOpenEditDecision = (decision?: any) => {
+    if (decision) {
+      setSelectedDecisionId(decision.id);
+      setFormAilmentCode(decision.ailmentCode);
+      setFormSeverity(decision.severity);
+      setFormAction(decision.action || '');
+      setFormOtcMeds((decision.otcMedications || []).join(', '));
+      setFormHomeCare((decision.homeCare || []).join(', '));
+      setFormTelemed((decision.telemedPartners || []).join(', '));
+      setFormDoseToddler(decision.doses?.toddler || '2.5ml');
+      setFormDoseChild(decision.doses?.child || '5ml');
+      setFormDoseAdult(decision.doses?.adult || '10ml');
+      setFormFrequency(decision.frequency || 'N/A');
+    } else {
+      setSelectedDecisionId(null);
+      setFormAilmentCode('fever');
+      setFormSeverity('GREEN');
+      setFormAction('Home Care');
+      setFormOtcMeds('');
+      setFormHomeCare('');
+      setFormTelemed('');
+      setFormDoseToddler('2.5ml');
+      setFormDoseChild('5ml');
+      setFormDoseAdult('10ml');
+      setFormFrequency('Once every 6 hours');
+    }
+    setIsEditingDecision(true);
+  };
+
+  const handleSaveDecisionForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingDecision(true);
+    try {
+      const payload = {
+        id: selectedDecisionId || undefined,
+        ailmentCode: formAilmentCode.trim().toLowerCase(),
+        severity: formSeverity,
+        action: formAction.trim(),
+        otcMedications: formOtcMeds.split(',').map(s => s.trim()).filter(Boolean),
+        homeCare: formHomeCare.split(',').map(s => s.trim()).filter(Boolean),
+        telemedPartners: formTelemed.split(',').map(s => s.trim()).filter(Boolean),
+        doses: {
+          neonate: 'N/A',
+          young_infant: 'N/A',
+          infant: 'N/A',
+          toddler: formDoseToddler.trim() || '2.5ml',
+          child: formDoseChild.trim() || '5ml',
+          adolescent: formDoseAdult.trim() || '10ml',
+          adult: formDoseAdult.trim() || '10ml',
+          elderly: formDoseAdult.trim() || '10ml'
+        },
+        frequency: formFrequency.trim() || 'N/A'
+      };
+      const ok = await saveTriageDecisionToDb(payload);
+      if (ok) {
+        showToast(`Triage decision for ${payload.ailmentCode} (${payload.severity}) saved to triage_decisions table!`);
+        setIsEditingDecision(false);
+        await loadTriageDecisions();
+      } else {
+        showToast('Failed to save triage decision.');
+      }
+    } catch (e) {
+      showToast('Error saving triage decision.');
+    } finally {
+      setIsSavingDecision(false);
+    }
+  };
+
+  useEffect(() => {
+    loadGuardrails();
+    loadTriageDecisions();
+  }, []);
+
+  useEffect(() => {
+    if (activeSubTab === 'guardrails') {
+      loadGuardrails();
+    } else if (activeSubTab === 'triage_medications') {
+      loadTriageDecisions();
     }
   }, [activeSubTab]);
 
@@ -1224,6 +1397,32 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
               >
                 <CloudSun size={14} />
                 <span>Environment</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('guardrails')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'guardrails'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Shield size={14} className={activeSubTab === 'guardrails' ? 'text-slate-950' : 'text-teal-400'} />
+                <span>Clinical Guardrails</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('triage_medications')}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeSubTab === 'triage_medications'
+                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Pill size={14} className={activeSubTab === 'triage_medications' ? 'text-slate-950' : 'text-amber-400'} />
+                <span>Triage Decisions & Medications</span>
               </button>
             </>
           )}
@@ -3440,6 +3639,446 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5B. CLINICAL GUARDRAILS (Spec §6) */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'guardrails' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-[#14212B] p-6 rounded-3xl border border-[#DDE5E9] dark:border-[#1E2D37] shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base sm:text-lg font-black text-[#14212B] dark:text-white flex items-center gap-2">
+                    <Shield className="text-teal-600 dark:text-teal-400" size={22} />
+                    <span>Clinical Guardrails & Hard-Stops Settings (Spec §6)</span>
+                  </h2>
+                  <HelperInfoButton
+                    title="Clinical Guardrails & Hard-Stops (Spec §6)"
+                    content="Configures safety thresholds and deterministic hard-stops enforced prior to patient-facing output. Guardrails prevent model drift and ensure strict adherence to clinical escalation boundaries."
+                  />
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Enforces deterministic clinical boundaries, allergy checks, pediatric safety cutoffs, and recertification windows across both Rule-based and Agentic triage.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-300 font-bold px-3 py-1 rounded-full border border-teal-200 dark:border-teal-800">
+                  SMC Governance Active
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSaveGuardrails}
+                  disabled={isSavingGuardrails}
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Save size={14} />
+                  <span>{isSavingGuardrails ? 'Saving...' : 'Save Guardrails to DB'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+              {/* Confidence Floor */}
+              <div className="bg-slate-50 dark:bg-[#0F1A20] p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="flex justify-between items-center font-bold text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>Confidence Floor</span>
+                    <HelperInfoButton
+                      size="xs"
+                      title="Confidence Floor Threshold"
+                      content={`Forces conservative escalation if clinical confidence score falls below ${confidenceFloor}%. Prevents low-confidence automated triage decisions.`}
+                    />
+                  </div>
+                  <span className="text-teal-700 dark:text-teal-300 font-black text-sm">{confidenceFloor}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="60"
+                  max="95"
+                  step="5"
+                  value={confidenceFloor}
+                  onChange={e => setConfidenceFloor(parseInt(e.target.value))}
+                  className="w-full accent-teal-600 cursor-pointer"
+                />
+                <div className="text-[10px] text-slate-400">
+                  Fallback trigger when certainty &lt; {confidenceFloor}%
+                </div>
+              </div>
+
+              {/* Allergy Hard Stop */}
+              <div className="bg-slate-50 dark:bg-[#0F1A20] p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="flex justify-between items-center font-bold text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>Allergy Hard Stop</span>
+                    <HelperInfoButton
+                      size="xs"
+                      title="Allergy Pre-Output Gate"
+                      content="Blocks any suggested over-the-counter (OTC) medications or interventions that conflict with recorded patient allergies."
+                    />
+                  </div>
+                  <span className={`font-black ${allergyHardStop ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {allergyHardStop ? 'ENABLED' : 'OFF'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAllergyHardStop(!allergyHardStop)}
+                  className={`w-full py-2 rounded-xl text-xs font-bold transition-all ${
+                    allergyHardStop ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {allergyHardStop ? '✓ Active Pre-Output Gate' : 'Bypass Disabled'}
+                </button>
+                <div className="text-[10px] text-slate-400">
+                  Auto-cross references against allergies
+                </div>
+              </div>
+
+              {/* Age Hard Stop */}
+              <div className="bg-slate-50 dark:bg-[#0F1A20] p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="flex justify-between items-center font-bold text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>Age Escalation Gate</span>
+                    <HelperInfoButton
+                      size="xs"
+                      title="Age Escalation Gate"
+                      content="Blocks HOME_MONITOR triage for high-risk cohorts: automatically escalates infants < 3 months with fever or frail seniors with fall trauma to emergency care or clinic."
+                    />
+                  </div>
+                  <span className={`font-black ${ageHardStop ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {ageHardStop ? 'ENABLED' : 'OFF'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAgeHardStop(!ageHardStop)}
+                  className={`w-full py-2 rounded-xl text-xs font-bold transition-all ${
+                    ageHardStop ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {ageHardStop ? '✓ Inf/Snr Gate Active' : 'Bypass Disabled'}
+                </button>
+                <div className="text-[10px] text-slate-400">
+                  Escalates infants &lt; 3m &amp; frail seniors
+                </div>
+              </div>
+
+              {/* Freshness Window & State Machine */}
+              <div className="bg-slate-50 dark:bg-[#0F1A20] p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="flex justify-between items-center font-bold text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>Freshness Window</span>
+                    <HelperInfoButton
+                      size="xs"
+                      title="Freshness Window & Retries"
+                      content="Sets hard expiration on unverified or stale clinical rules requiring recertification after the specified days, and caps automated agent retry cycles."
+                    />
+                  </div>
+                  <span className="text-teal-700 dark:text-teal-300 font-black text-sm">{stalenessWindowDays} Days</span>
+                </div>
+                <input
+                  type="range"
+                  min="30"
+                  max="365"
+                  step="15"
+                  value={stalenessWindowDays}
+                  onChange={e => setStalenessWindowDays(parseInt(e.target.value))}
+                  className="w-full accent-teal-600 cursor-pointer"
+                />
+                <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 pt-1">
+                  <span>Max Agent Retries:</span>
+                  <span className="font-mono font-bold bg-slate-200 dark:bg-slate-800 px-2 py-0.5 rounded">
+                    {maxRetryCount} revisions
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5C. TRIAGE DECISIONS & MEDICATIONS MANAGEMENT TABLE */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'triage_medications' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-[#14212B] p-6 rounded-3xl border border-[#DDE5E9] dark:border-[#1E2D37] shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <h2 className="text-base sm:text-lg font-black text-[#14212B] dark:text-white flex items-center gap-2">
+                  <Pill className="text-teal-600 dark:text-teal-400" size={22} />
+                  <span>Deterministic Triage Decisions & Medications Registry</span>
+                  <HelperInfoButton
+                    title="Triage Decisions & Medications Registry"
+                    content="Manages the deterministic SQLite triage_decisions table. Controls OTC medications, home care instructions, dosage by age band, and frequency for Rule-Based Triage & Caregiver Scheduler."
+                  />
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Persisted directly in SQLite <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-teal-700 dark:text-teal-400 font-mono">triage_decisions</code> table. Powers OTC recommendations and scheduler dosage calculations.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <select
+                  value={decisionFilterAilment}
+                  onChange={e => setDecisionFilterAilment(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-xs font-bold text-slate-700 dark:text-slate-200"
+                >
+                  <option value="ALL">All Ailments</option>
+                  <option value="fever">Fever</option>
+                  <option value="cough">Cough</option>
+                  <option value="cold">Cold</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenEditDecision()}
+                  className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center gap-1.5"
+                >
+                  <Plus size={14} />
+                  <span>Add Decision / Med</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Table of Decisions */}
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-[#0F1A20] border-b border-slate-200 dark:border-slate-800 text-[11px] font-black uppercase text-slate-600 dark:text-slate-400">
+                  <tr>
+                    <th className="p-3">ID</th>
+                    <th className="p-3">Ailment</th>
+                    <th className="p-3">Severity</th>
+                    <th className="p-3">Status / Action</th>
+                    <th className="p-3">OTC Medications</th>
+                    <th className="p-3">Dose (Toddler / Child / Adult)</th>
+                    <th className="p-3">Frequency</th>
+                    <th className="p-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                  {triageDecisionsList
+                    .filter(d => decisionFilterAilment === 'ALL' || d.ailmentCode === decisionFilterAilment)
+                    .map(item => (
+                      <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-500">{item.id}</td>
+                        <td className="p-3 font-black uppercase text-teal-700 dark:text-teal-400">{item.ailmentCode}</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                            item.severity === 'RED' ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300' :
+                            item.severity === 'ORANGE' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' :
+                            item.severity === 'YELLOW' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300' :
+                            'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                          }`}>
+                            {item.severity}
+                          </span>
+                        </td>
+                        <td className="p-3 font-medium">{item.action}</td>
+                        <td className="p-3">
+                          {item.otcMedications && item.otcMedications.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {item.otcMedications.map((m: string, idx: number) => (
+                                <span key={idx} className="bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-900 text-[11px] font-bold">
+                                  {m}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 italic">None</span>
+                          )}
+                        </td>
+                        <td className="p-3 font-mono text-[11px]">
+                          {item.doses ? `${item.doses.toddler} / ${item.doses.child} / ${item.doses.adult}` : 'N/A'}
+                        </td>
+                        <td className="p-3">
+                          <span className="font-semibold text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-900 text-[11px]">
+                            {item.frequency || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditDecision(item)}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg font-bold text-xs flex items-center gap-1 ml-auto transition-all"
+                          >
+                            <Edit2 size={12} />
+                            <span>Edit</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  {triageDecisionsList.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="p-6 text-center text-slate-400 italic">
+                        {isLoadingDecisions ? 'Loading triage decisions from SQLite...' : 'No triage decisions found in SQLite table.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Edit / Add Modal */}
+          {isEditingDecision && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-[#14212B] w-full max-w-xl rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 animate-scaleUp">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <Pill className="text-teal-600" size={20} />
+                    <span>{selectedDecisionId ? 'Edit Triage Decision & Medication' : 'Add New Triage Decision & Medication'}</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingDecision(false)}
+                    className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveDecisionForm} className="space-y-4 text-xs">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Ailment Code</label>
+                      <input
+                        type="text"
+                        required
+                        value={formAilmentCode}
+                        onChange={e => setFormAilmentCode(e.target.value)}
+                        placeholder="e.g. fever, cough, cold"
+                        className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white font-medium"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Severity</label>
+                      <select
+                        value={formSeverity}
+                        onChange={e => setFormSeverity(e.target.value)}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white font-bold"
+                      >
+                        <option value="GREEN">GREEN</option>
+                        <option value="YELLOW">YELLOW</option>
+                        <option value="ORANGE">ORANGE</option>
+                        <option value="RED">RED</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Status / Action</label>
+                    <input
+                      type="text"
+                      required
+                      value={formAction}
+                      onChange={e => setFormAction(e.target.value)}
+                      placeholder="e.g. Home Care, Teledoctor / GP"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">OTC Medications (comma-separated)</label>
+                    <input
+                      type="text"
+                      value={formOtcMeds}
+                      onChange={e => setFormOtcMeds(e.target.value)}
+                      placeholder="e.g. Paracetamol, Ibuprofen"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Toddler Dose</label>
+                      <input
+                        type="text"
+                        value={formDoseToddler}
+                        onChange={e => setFormDoseToddler(e.target.value)}
+                        placeholder="e.g. 2.5ml"
+                        className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Child Dose</label>
+                      <input
+                        type="text"
+                        value={formDoseChild}
+                        onChange={e => setFormDoseChild(e.target.value)}
+                        placeholder="e.g. 5ml"
+                        className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Adult / Senior Dose</label>
+                      <input
+                        type="text"
+                        value={formDoseAdult}
+                        onChange={e => setFormDoseAdult(e.target.value)}
+                        placeholder="e.g. 10ml"
+                        className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Administration Frequency</label>
+                    <input
+                      type="text"
+                      value={formFrequency}
+                      onChange={e => setFormFrequency(e.target.value)}
+                      placeholder="e.g. Once every 6 hours, 3 times a day"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white font-semibold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Home Care Guidance (comma-separated)</label>
+                    <input
+                      type="text"
+                      value={formHomeCare}
+                      onChange={e => setFormHomeCare(e.target.value)}
+                      placeholder="e.g. Drink plenty of water, Rest, Tepid sponging"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Telemedicine Partners (comma-separated)</label>
+                    <input
+                      type="text"
+                      value={formTelemed}
+                      onChange={e => setFormTelemed(e.target.value)}
+                      placeholder="e.g. Whitecoat, Doctor Anywhere"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F1A20] text-slate-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div className="pt-3 flex justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingDecision(false)}
+                      className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingDecision}
+                      className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold shadow flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Save size={14} />
+                      <span>{isSavingDecision ? 'Saving...' : 'Save to SQLite'}</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

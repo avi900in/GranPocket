@@ -1,6 +1,7 @@
 import type { Ailment, TriageRule, AgeBand, Language, Severity, QuestionStep, TriageResult, Person, ContentStatus } from "../types";
 import { getResultPhrasing } from './grandmaVoice';
 import { runRuleBasedTriage } from './ruleBasedEngine';
+import { fetchTriageDecisionFromDb } from '../services/dbService';
 
 // These are now dynamic, fetched from DB
 export const AILMENTS: Ailment[] = [];
@@ -1043,6 +1044,18 @@ export async function runTriage(input: any): Promise<TriageResult> {
     imageDescriptors: input.imageDescriptors,
     language: 'en'
   });
+
+  if (input.ailment?.code) {
+    try {
+      const decision = await fetchTriageDecisionFromDb(input.ailment.code, fallbackResult.severity);
+      if (decision) {
+        fallbackResult.deterministicAction = decision.action;
+        fallbackResult.otcMedications = decision.otcMedications;
+        fallbackResult.homeCare = decision.homeCare;
+        fallbackResult.telemedPartners = decision.telemedPartners;
+      }
+    } catch {}
+  }
 
   fallbackResult.disclaimer = "Agentic Triage Offline - Fallback to Rule-Based Engine";
   fallbackResult.summary = "Swarm connection failed. Used Rule-Based Fallback: " + (fallbackResult.summary || '');

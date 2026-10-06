@@ -5,6 +5,7 @@ import { getQuestionTree, runTriage } from '../engine/triageEngine';
 import { runRuleBasedTriage, getQuestionTree as getRuleBasedQuestionTree } from '../engine/ruleBasedEngine';
 import { RealVoiceRecorder } from './RealVoiceRecorder';
 import { RealPhotoUploader } from './RealPhotoUploader';
+import { fetchTriageDecisionFromDb } from '../services/dbService';
 
 interface TriageFlowViewProps {
   person: Person;
@@ -103,16 +104,41 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
     }
   }, [textInput, emergencyKeywords]);
 
+  const [visionMetaState, setVisionMetaState] = useState<any>(null);
+
   // NLP matcher to guess ailment from text/voice
   const detectAilmentFromText = (text: string): Ailment => {
     const lower = text.toLowerCase();
+    
+    // Check specific high-priority ocular keywords first (conjunctivitis / red eye / sclera / vision)
+    if (
+      lower.includes('eye') || 
+      lower.includes('vision') || 
+      lower.includes('conjunctiv') || 
+      lower.includes('hyperemia') || 
+      lower.includes('sclera') || 
+      lower.includes('cornea') || 
+      lower.includes('pink eye') ||
+      lower.includes('red eye')
+    ) {
+      const eyeAilment = ailments.find(a => a.code === 'eye_symptoms');
+      if (eyeAilment) return eyeAilment;
+    }
+
     for (const a of ailments) {
       if (lower.includes(a.code.replace('_', ' '))) return a;
       if (lower.includes(a.name.toLowerCase())) return a;
     }
-    if (lower.includes('cut') || lower.includes('bleed') || lower.includes('fall')) return ailments.find(a => a.code === 'injury_wound') || ailments[0];
-    if (lower.includes('eye') || lower.includes('vision')) return ailments.find(a => a.code === 'eye_symptoms') || ailments[0];
-    return ailments[0]; // fallback
+    if (lower.includes('cut') || lower.includes('bleed') || lower.includes('fall') || lower.includes('wound')) {
+      return ailments.find(a => a.code === 'injury_wound') || ailments[0];
+    }
+    if (lower.includes('rash') || lower.includes('skin') || lower.includes('itch')) {
+      return ailments.find(a => a.code === 'skin_rash') || ailments[0];
+    }
+    if (lower.includes('fever') || lower.includes('temp') || lower.includes('hot')) {
+      return ailments.find(a => a.code === 'fever') || ailments[0];
+    }
+    return ailments.find(a => a.code === 'eye_symptoms') || ailments[0]; // fallback
   };
 
   // AbortController for cancelling triage
@@ -126,7 +152,7 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
     setAnswerInput('');
   };
 
-  const startAssessment = async (detectedAilment: Ailment) => {
+  const startAssessment = async (detectedAilment: Ailment, customQuestions?: QuestionStep[]) => {
     if (emergencyWarning) {
       setStep('processing');
       abortControllerRef.current = new AbortController();
@@ -149,6 +175,20 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
           imageDescriptors: photoDescriptors,
           language
         });
+        // Enrich with triage_decisions from SQLite table via backend API
+        try {
+          const decision = await fetchTriageDecisionFromDb(detectedAilment.code, result.severity);
+          if (decision) {
+            result.deterministicAction = decision.action;
+            result.otcMedications = decision.otcMedications;
+            result.homeCare = decision.homeCare;
+            result.telemedPartners = decision.telemedPartners;
+            result.medicationDoseByAge = decision.doses;
+            result.medicationFrequency = decision.frequency;
+          }
+        } catch (decErr) {
+          console.warn('[TriageFlowView] Error fetching decision from DB:', decErr);
+        }
       }
       onTriageComplete(result, { emergency_bypass: true }, detectedAilment);
       return;
@@ -159,7 +199,9 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
     setIsFetchingQuestions(true);
     
     let fetchedQuestions: QuestionStep[] = [];
-    if (triageMode === 'agentic') {
+    if (customQuestions && customQuestions.length > 0) {
+      fetchedQuestions = customQuestions;
+    } else if (triageMode === 'agentic') {
       fetchedQuestions = await getQuestionTree(detectedAilment.code, person);
     } else {
       fetchedQuestions = getRuleBasedQuestionTree(detectedAilment.code, person);
@@ -206,6 +248,22 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
           imageDescriptors: photoDescriptors,
           language
         });
+        // Enrich with triage_decisions from SQLite table via backend API
+        if (selectedAilment?.code) {
+          try {
+            const decision = await fetchTriageDecisionFromDb(selectedAilment.code, result.severity);
+            if (decision) {
+              result.deterministicAction = decision.action;
+              result.otcMedications = decision.otcMedications;
+              result.homeCare = decision.homeCare;
+              result.telemedPartners = decision.telemedPartners;
+              result.medicationDoseByAge = decision.doses;
+              result.medicationFrequency = decision.frequency;
+            }
+          } catch (decErr) {
+            console.warn('[TriageFlowView] Error fetching decision from DB:', decErr);
+          }
+        }
       }
       
       onTriageComplete(result, newAnswers, selectedAilment!);
@@ -529,16 +587,25 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
             <RealPhotoUploader 
               language={language}
               initialPhotoUrl={photoUrl}
-              onPhotoAnalyzed={(url, desc) => {
+              onPhotoAnalyzed={(url, desc, qualityOk, meta) => {
                 setPhotoUrl(url);
                 setPhotoDescriptors(desc);
-                if (!textInput) setTextInput(`Visual inspection uploaded: ${desc[0]}`);
+                if (meta) {
+                  setVisionMetaState(meta);
+                }
+                const firstDesc = desc && desc.length > 0 ? desc[0] : 'Visual inspection uploaded';
+                setTextInput(prev => prev || `Visual inspection: ${firstDesc}`);
               }}
             />
             {(photoUrl || textInput) && (
               <div className="flex justify-end mt-4">
                 <button 
-                  onClick={() => startAssessment(detectAilmentFromText(textInput || 'rash'))}
+                  onClick={() => {
+                    const detectedCode = visionMetaState?.detectedAilmentCode || 'eye_symptoms';
+                    const targetAilment = ailments.find(a => a.code === detectedCode) || 
+                                          detectAilmentFromText(textInput || 'conjunctivitis red eye');
+                    startAssessment(targetAilment, visionMetaState?.leadingQuestions);
+                  }}
                   className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center gap-2"
                 >
                   <span>{t.assessImage}</span>

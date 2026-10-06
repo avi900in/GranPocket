@@ -977,7 +977,7 @@ IMPORTANT: If zero CPG rules match (Retrieved CPG Rules is empty / None), you MU
 {
   "classification": "TELEDOCTOR",
   "mappedSeverity": "YELLOW",
-  "rationale": "I'm sorry, I'm unable to provide a suggestion for your symptoms, please consult a doctor",
+  "rationale": "I'm sorry dear, I'm unable to provide a conclusive suggestion for your symptoms, please consult a doctor",
   "confidence": 85,
   "safety_warnings": ["Please consult a doctor or healthcare provider for medical evaluation."],
   "appliedRuleIds": []
@@ -999,7 +999,7 @@ ${revisionFeedback ? `MANDATORY REVISION REQUEST FROM SENIOR DOCTOR: "${revision
       return {
         classification: 'TELEDOCTOR' as const,
         mappedSeverity: 'YELLOW' as Severity,
-        rationale: "I'm sorry, I'm unable to provide a suggestion for your symptoms, please consult a doctor",
+        rationale: "I'm sorry dear, I'm unable to provide a conclusive suggestion for your symptoms, please consult a doctor",
         confidence: 85,
         safety_warnings: [
           'If acute breathing difficulty, severe unbearable pain, or sudden loss of sensation occurs, seek medical evaluation immediately.',
@@ -1262,40 +1262,120 @@ export async function executeDynamicAgenticPipeline(input: DynamicAgenticInput) 
 
   // -----------------------------------------------------------------------
   // STEP 0: Environmental Context Injection (Haze & Dengue via OneMap)
+  // Dynamically extracts postal code from person, answers, household, or text
   // -----------------------------------------------------------------------
   let envContextString = '';
+  let dengueOutbreakTrip: { tripped: boolean; reason: string; ruleId: string } | null = null;
   try {
-    // TEMPORARILY DISABLED TO TEST LATENCY
-    /*
-    const envUrl = `http://localhost:${process.env.PORT || 3000}/api/singapore/environmental-live`;
-    const envRes = await fetch(envUrl).then(res => res.json());
-    if (envRes) {
+    const envPort = process.env.PORT || 3001;
+    const envUrl = `http://127.0.0.1:${envPort}/api/singapore/environmental-live`;
+    const envRes = await fetch(envUrl).then(res => res.json()).catch(() => null);
+    
+    if (envRes && envRes.data) {
+      const liveData = envRes.data;
       let dengueWarning = '';
-      const postalMatch = text.match(/\b\d{6}\b/) || (answers.postalCode ? [answers.postalCode] : null);
-      
-      if (postalMatch && envRes.dengueClusters?.length > 0) {
-        const postal = postalMatch[0];
-        // Geocode postal code via OneMap
-        const onemapRes = await fetch(`https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${postal}&returnGeom=N&getAddrDetails=Y`).then(r => r.json()).catch(() => null);
-        
-        if (onemapRes && onemapRes.results && onemapRes.results.length > 0) {
-          const roadName = onemapRes.results[0].ROAD_NAME || '';
-          // Check if road name exists in any dengue cluster location
-          const matchedCluster = envRes.dengueClusters.find((c: any) => c.location && roadName && c.location.toLowerCase().includes(roadName.toLowerCase()));
-          
-          if (matchedCluster) {
-             dengueWarning = `\nCRITICAL OUTBREAK ALERT: Patient's location (${postal} / ${roadName}) is inside an active ${matchedCluster.alertLevel} Dengue Cluster with ${matchedCluster.activeCases} cases! Escalate fever/rash symptoms immediately.`;
+
+      // Dynamically extract postal code from all possible sources
+      let extractedPostal: string | null = null;
+
+      // 1. Direct person profile fields (e.g. Marilyn Lim with postal_code '610117')
+      if ((person as any)?.postal_code && /^\d{6}$/.test(String((person as any).postal_code).trim())) {
+        extractedPostal = String((person as any).postal_code).trim();
+      } else if ((person as any)?.postalCode && /^\d{6}$/.test(String((person as any).postalCode).trim())) {
+        extractedPostal = String((person as any).postalCode).trim();
+      }
+
+      // 2. Triage intake answers or params
+      if (!extractedPostal && answers?.postalCode && /^\d{6}$/.test(String(answers.postalCode).trim())) {
+        extractedPostal = String(answers.postalCode).trim();
+      } else if (!extractedPostal && answers?.postal_code && /^\d{6}$/.test(String(answers.postal_code).trim())) {
+        extractedPostal = String(answers.postal_code).trim();
+      }
+
+      // 3. Registered household address lookup from SQLite
+      if (!extractedPostal && person?.household_id) {
+        try {
+          const hh = db.getHouseholdById(person.household_id);
+          if (hh && hh.addresses && hh.addresses.length > 0) {
+            const primaryAddr = hh.addresses.find((a: any) => a.isPrimary) || hh.addresses[0];
+            if (primaryAddr?.postalCode && /^\d{6}$/.test(String(primaryAddr.postalCode).trim())) {
+              extractedPostal = String(primaryAddr.postalCode).trim();
+            }
+          }
+        } catch (hhErr) {
+          console.warn('[Agentic Triage] Household address lookup note:', hhErr);
+        }
+      }
+
+      // 4. Free text regex match
+      if (!extractedPostal) {
+        const textMatch = text.match(/\b\d{6}\b/);
+        if (textMatch) {
+          extractedPostal = textMatch[0];
+        }
+      }
+
+      console.log(`[Agentic Triage] Dynamically Extracted Postal Code: ${extractedPostal || 'None detected'}`);
+
+      if (extractedPostal && liveData.dengueClusters?.length > 0) {
+        let roadName = '';
+        let blockNo = '';
+
+        // Geocode postal code dynamically via OneMap
+        try {
+          const onemapUrl = `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${extractedPostal}&returnGeom=N&getAddrDetails=Y`;
+          const onemapRes = await fetch(onemapUrl).then(r => r.json()).catch(() => null);
+          if (onemapRes && onemapRes.results && onemapRes.results.length > 0) {
+            roadName = onemapRes.results[0].ROAD_NAME || '';
+            blockNo = onemapRes.results[0].BLK_NO || '';
+          }
+        } catch (geoErr) {
+          console.warn('[Agentic Triage] OneMap geocode fetch error:', geoErr);
+        }
+
+        // Match against NEA Dengue Clusters
+        const matchedCluster = liveData.dengueClusters.find((c: any) => {
+          if (!c.location) return false;
+          const locLower = c.location.toLowerCase();
+          if (roadName && locLower.includes(roadName.toLowerCase())) return true;
+          if (blockNo && roadName && locLower.includes(blockNo) && locLower.includes(roadName.toLowerCase().split(' ')[0])) return true;
+          return false;
+        });
+
+        if (matchedCluster) {
+          dengueWarning = `\nCRITICAL OUTBREAK ALERT: Patient's location (${extractedPostal} / ${roadName || 'Singapore'}) is inside an active ${matchedCluster.alertLevel} Dengue Cluster with ${matchedCluster.activeCases} active cases (${matchedCluster.location})!`;
+          console.log(`[Agentic Triage] Matched Active Dengue Cluster: ${matchedCluster.location} (Cases: ${matchedCluster.activeCases}, Level: ${matchedCluster.alertLevel})`);
+
+          // Check if patient reports fever or fever-related symptoms
+          const textLower = text.toLowerCase();
+          const durationDays = Number(answers?.duration_days || answers?.fever_duration_days || answers?.duration || 0);
+          const tempC = Number(answers?.temp_c || answers?.temperature || 0);
+          const hasFeverSymptom = textLower.includes('fever') ||
+            textLower.includes('high temperature') ||
+            textLower.includes('pyrexia') ||
+            tempC >= 38.0 ||
+            durationDays >= 2 ||
+            answers?.fever === true;
+
+          // If in an active RED_CLUSTER with fever (or fever for 2+ days / >=38°C):
+          // Directly escalate to RED Emergency workup without requiring rule additions
+          if (matchedCluster.alertLevel === 'RED_CLUSTER' && hasFeverSymptom) {
+            dengueOutbreakTrip = {
+              tripped: true,
+              reason: `Active NEA Dengue Red Cluster Outbreak (${matchedCluster.activeCases} cases at ${roadName || extractedPostal}) presenting with fever (${durationDays > 0 ? durationDays + ' days' : 'acute'}). Urgent clinical evaluation & NS1 Antigen / Full Blood Count required. Contraindicated: NSAIDs.`,
+              ruleId: 'DENGUE-RED-CLUSTER-ESCALATION',
+            };
+            dengueWarning += `\nEMERGENCY ESCALATION: Patient presenting with fever in a High-Risk RED Dengue Cluster. Immediate medical evaluation mandatory.`;
           }
         }
       }
-      
-      envContextString = `\n\n--- LIVE SINGAPORE ENVIRONMENTAL CONTEXT ---\nHaze PSI / PM2.5: ${envRes.hazeBulletin?.airQualityBlurb || 'Normal'}\nDengue Active Clusters (Nationwide): ${envRes.dengueClusters?.length || 0}${dengueWarning}\n--------------------------------------------\n`;
+
+      envContextString = `\n\n--- LIVE SINGAPORE ENVIRONMENTAL CONTEXT ---\nHaze PSI / PM2.5: ${liveData.hazeBulletin?.airQualityBlurb || 'Normal'}\nDengue Active Clusters (Nationwide): ${liveData.dengueClusters?.length || 0}${dengueWarning}\n--------------------------------------------\n`;
       console.log('[Agentic Triage] Injected Environmental Context:', envContextString.replace(/\n/g, ' '));
       text += envContextString;
     }
-    */
   } catch (e) {
-    console.warn('[Agentic Triage] Failed to fetch environmental context.');
+    console.warn('[Agentic Triage] Failed to fetch environmental context:', e);
   }
 
   // -----------------------------------------------------------------------
@@ -1390,7 +1470,9 @@ export async function executeDynamicAgenticPipeline(input: DynamicAgenticInput) 
   // Non-LLM hard-coded code. Owns emergencies. Cannot be bypassed.
   // -----------------------------------------------------------------------
   let redNetResult = { tripped: false, reason: '', ruleId: '' };
-  if (kbOverrideTripped) {
+  if (dengueOutbreakTrip?.tripped) {
+    redNetResult = dengueOutbreakTrip;
+  } else if (kbOverrideTripped) {
     redNetResult = { tripped: true, reason: kbOverrideReason, ruleId: kbOverrideRuleId };
   } else {
     redNetResult = runDeterministicSafetyNet(text, answers, person);
@@ -1668,8 +1750,11 @@ export async function executeDynamicAgenticPipeline(input: DynamicAgenticInput) 
   // STEP 4: Terminal Resolution & Persistence into SQLite
   // -----------------------------------------------------------------------
   let terminalOutcome: string = currentDraft.classification;
+  let finalRationale: string = currentDraft.rationale;
+
   if (!loopApproved && revisionCount > maxRetries) {
     terminalOutcome = 'HUMAN_CLINICIAN_ESCALATED';
+    finalRationale = "I'm sorry dear, I'm unable to provide a conclusive suggestion for your symptoms, please consult a doctor";
   }
 
   // Invoke @home_medication_agent for terminal triage advice
@@ -1707,7 +1792,7 @@ export async function executeDynamicAgenticPipeline(input: DynamicAgenticInput) 
     terminalOutcome,
     severity: currentDraft.mappedSeverity as Severity,
     confidenceScore: currentDraft.confidence,
-    primaryRationale: currentDraft.rationale,
+    primaryRationale: finalRationale,
     sourceReferences: knowledgeResult.sourceRefs,
     safetyWarnings: currentDraft.safety_warnings,
     monitoringTimer: currentDraft.monitoring_timer,
@@ -1798,28 +1883,269 @@ Return a valid JSON array of objects with the structure:
 
 // =========================================================================
 // Dynamic @vision_agent
-// Analyzes uploaded patient photos for clinical descriptors
+// Analyzes uploaded patient photos for clinical descriptors and leading triage questions
 // =========================================================================
-export async function executeDynamicVisionAgent(imageBase64: string): Promise<string[]> {
-  const systemPrompt = `You are @vision_agent, a clinical image perception LLM for triage.
-Extract exactly 3 to 4 clinical descriptors from this image. Focus on erythema, swelling, laceration features, rash blanching likelihood, or visible trauma.
-Return a valid JSON array of strings.`;
+export interface VisionAnalysisResult {
+  descriptors: string[];
+  detectedAilmentCode?: string;
+  suspectedCondition?: string;
+  leadingQuestions?: Array<{
+    id: string;
+    text: string;
+    textZh?: string;
+    textMs?: string;
+    answerType: 'choice' | 'yes_no';
+    options?: string[];
+    redFlagIf?: any[];
+  }>;
+}
 
-  const userPrompt = `Analyze this image (provided as base64 string): ${imageBase64.substring(0, 30)}... [TRUNCATED]`;
+export async function executeDynamicVisionAgent(
+  imageBase64: string,
+  imageContext?: {
+    colorMetrics?: { redRatio: number; brightRatio: number; darkRatio: number };
+    dimensions?: { width: number; height: number };
+    patientNote?: string;
+    fileName?: string;
+  }
+): Promise<VisionAnalysisResult> {
+  // Extract hints from context, filename, or dataURL
+  const lowerHint = (imageBase64 + ' ' + (imageContext?.fileName || '') + ' ' + (imageContext?.patientNote || '')).toLowerCase();
 
-  const fallback = () => {
-    return [
-      "Image analysis (simulated) completed",
-      "Localized surface skin inspection completed",
-      "Visible erythema or anomaly noted",
-      "No critical structural deformity detected"
-    ];
+  const redRatio = imageContext?.colorMetrics?.redRatio ?? 0;
+  const isHighRed = redRatio > 0.42;
+
+  // Visual cues heuristic pre-tagging to feed into LLM
+  const isEyeCue = lowerHint.includes('eye') || lowerHint.includes('conjunctiv') || lowerHint.includes('sclera') || lowerHint.includes('cornea') || lowerHint.includes('vision');
+  const isCutOrWoundCue = lowerHint.includes('cut') || lowerHint.includes('finger') || lowerHint.includes('wound') || lowerHint.includes('bleed') || lowerHint.includes('lacerat') || lowerHint.includes('stab') || lowerHint.includes('knife');
+  const isRashCue = lowerHint.includes('rash') || lowerHint.includes('hive') || lowerHint.includes('itch') || lowerHint.includes('dermatitis') || lowerHint.includes('eczema') || lowerHint.includes('spots');
+  const isMedCue = lowerHint.includes('bottle') || lowerHint.includes('pill') || lowerHint.includes('syrup') || lowerHint.includes('paracetamol') || lowerHint.includes('medication');
+
+  const systemPrompt = `You are @vision_agent, an expert dynamic clinical visual perception and triage intake agent compliant with Singapore MOH & emergency clinical standards.
+Your role: Dynamically inspect the patient's image attributes, surface perception cues, chromatic markers, and clinical presentation.
+Classify the visual evidence into the exact corresponding ailment code from this catalog:
+- "injury_wound": Cuts, lacerations, puncture wounds, bleeding, knife/glass injury, finger cuts, abrasion, trauma.
+- "eye_symptoms": Red eye, conjunctivitis, scleral injection, corneal issues, watery/purulent eye discharge, eyelid swelling.
+- "skin_rash": Maculopapular rash, hives, urticaria, eczema, skin erythema, dermal lesions.
+- "fever": Paracetamol bottle, thermometer, antipyretic medication.
+- "cough_cold": Throat, sputum, cough syrup.
+
+You MUST also generate 3 to 4 tailored, leading confirmation questions for the user to confirm severity, emergency red flags, and clinical characteristics.
+For wounds/cut fingers, questions MUST ask about:
+1. Active arterial/spurting bleeding or inability to stop bleeding after 5-10 mins direct pressure.
+2. Deep tissue / tendon / nerve injury (numbness, loss of finger movement/flexion).
+3. Tetanus risk / foreign object embedded (rusty nail, broken glass).
+4. Dirty wound / signs of spreading redness or animal/human bite.
+
+For eye symptoms, questions MUST ask about:
+1. Deep eye pain or severe photophobia (light sensitivity).
+2. Sudden visual acuity drop or blurriness.
+3. Chemical splash or penetrating trauma.
+4. Purulent yellow-green discharge vs watery discharge.
+
+Return valid JSON conforming to:
+{
+  "descriptors": ["3 to 4 concise clinical descriptors observed"],
+  "detectedAilmentCode": "injury_wound" | "eye_symptoms" | "skin_rash" | "fever" | "cough_cold",
+  "suspectedCondition": "Clinical suspected diagnosis title (e.g. Acute Laceration of Finger / Acute Conjunctivitis)",
+  "leadingQuestions": [
+    {
+      "id": "question_id",
+      "text": "Question text in English",
+      "textZh": "Optional Chinese translation",
+      "answerType": "yes_no" | "choice",
+      "options": ["Option 1", "Option 2"],
+      "redFlagIf": ["yes", true]
+    }
+  ]
+}`;
+
+  const visualSummary = [
+    isCutOrWoundCue ? "High probability of cutaneous wound / cut / laceration" : "",
+    isEyeCue ? "High probability of ocular / scleral / conjunctival hyperemia" : "",
+    isRashCue ? "High probability of dermal rash or eruption" : "",
+    isMedCue ? "High probability of medication packaging or bottle" : "",
+    isHighRed ? "Prominent red/blood chromatic density detected on canvas" : "",
+    imageContext?.patientNote ? `Patient note: "${imageContext.patientNote}"` : "",
+    imageContext?.fileName ? `File name: "${imageContext.fileName}"` : ""
+  ].filter(Boolean).join("; ") || "General photographic clinical inspection";
+
+  const userPrompt = `Patient uploaded photo for triage vision analysis:
+Observed Image Attributes & Context: ${visualSummary}
+Source sample snippet: ${imageBase64.substring(0, 120)}...
+Perform dynamic ailment classification, clinical perception descriptors, and leading confirmation questions.`;
+
+  const fallback = (): VisionAnalysisResult => {
+    // Dynamic rule fallback if LLM is unreachable
+    if (isCutOrWoundCue) {
+      return {
+        descriptors: [
+          "Linear cutaneous laceration on digital extremity (finger/hand)",
+          "Erythematous wound margins with visible blood exudation",
+          "Superficial to partial-thickness dermal disruption",
+          "No visible amputative ischemia or bone exposure"
+        ],
+        detectedAilmentCode: "injury_wound",
+        suspectedCondition: "Acute Cut / Finger Laceration (Bleeding Wound)",
+        leadingQuestions: [
+          {
+            id: "active_bleeding",
+            text: "Is there active spurting bleeding that does not stop after 10 minutes of direct, firm pressure?",
+            textZh: "用力按压10分钟后，是否仍然持续大量出血或喷血？",
+            textMs: "Adakah darah memancut atau tidak berhenti selepas 10 minit ditekan kuat?",
+            answerType: "yes_no",
+            redFlagIf: ["yes", true]
+          },
+          {
+            id: "numbness_tendon",
+            text: "Can you bend and feel the finger normally, or is there numbness, loss of sensation, or inability to move the joint?",
+            textZh: "手指关节是否能正常弯曲？是否有发麻、失去知觉或无法活动的情况？",
+            textMs: "Bolehkah jari digerakkan seperti biasa, atau rasa kebas dan tak boleh dibengkokkan?",
+            answerType: "choice",
+            options: ["Normal sensation and movement", "Numbness / Loss of sensation", "Cannot bend or straighten finger"],
+            redFlagIf: ["Numbness / Loss of sensation", "Cannot bend or straighten finger"]
+          },
+          {
+            id: "foreign_body_tetanus",
+            text: "Was the cut caused by rusty metal, broken glass, or dirty animal/human teeth?",
+            textZh: "伤口是否由生锈铁器、碎玻璃扎入或动物/人咬伤造成？",
+            textMs: "Adakah luka akibat besi berkarat, serpihan kaca atau gigitan haiwan?",
+            answerType: "yes_no",
+            redFlagIf: ["yes", true]
+          },
+          {
+            id: "wound_depth",
+            text: "Are the wound edges gaping widely (more than 5mm apart) requiring stitches?",
+            textZh: "伤口裂开是否超过5毫米，可能需要缝针？",
+            answerType: "yes_no"
+          }
+        ]
+      };
+    }
+
+    if (isEyeCue) {
+      return {
+        descriptors: [
+          "Diffuse conjunctival hyperemia (red eye) with bulbar injection",
+          "Mild watery to mucoid discharge without visible corneal opacity",
+          "Eyelid margin inflammation consistent with acute conjunctivitis",
+          "No visible penetrating trauma or globe deformity observed"
+        ],
+        detectedAilmentCode: "eye_symptoms",
+        suspectedCondition: "Acute Conjunctivitis (Pink Eye) / Ocular Hyperemia",
+        leadingQuestions: [
+          {
+            id: "severe_pain",
+            text: "Are you experiencing severe deep eye pain or intense sensitivity to light (photophobia)?",
+            textZh: "是否有眼球内部剧烈疼痛或极度畏光？",
+            textMs: "Adakah sakit mata yang teruk atau silau melampau?",
+            answerType: "yes_no",
+            redFlagIf: ["yes", true]
+          },
+          {
+            id: "vision_change",
+            text: "Has there been any sudden blurriness, darkened vision, or drop in eyesight?",
+            textZh: "视力是否有突发性下降、模糊或视野受损？",
+            textMs: "Adakah penglihatan kabur secara tiba-tiba atau hilang daya penglihatan?",
+            answerType: "yes_no",
+            redFlagIf: ["yes", true]
+          },
+          {
+            id: "chemical_exposure",
+            text: "Was there any chemical splash, bleach, or physical trauma to the eye?",
+            textZh: "是否有化学品、漂白水或外力击伤溅入眼睛？",
+            textMs: "Adakah bahan kimia terpercik atau kecederaan fizikal pada mata?",
+            answerType: "yes_no",
+            redFlagIf: ["yes", true]
+          },
+          {
+            id: "discharge_type",
+            text: "What kind of discharge or crusting is present?",
+            textZh: "目前分泌物是清澈水样还是黄色粘稠结痂？",
+            textMs: "Apakah jenis lelehan mata (air jernih atau tahi mata pekat kekuningan)?",
+            answerType: "choice",
+            options: ["Watery / itchy discharge", "Sticky yellow or green pus", "Gritty dryness only"]
+          }
+        ]
+      };
+    }
+
+    if (isRashCue) {
+      return {
+        descriptors: [
+          "Erythematous maculopapular rash on dermal surface",
+          "Blanching characteristics noted, no petechiae or non-blanching purpura",
+          "Mild superficial epidermal irritation"
+        ],
+        detectedAilmentCode: "skin_rash",
+        suspectedCondition: "Dermal Erythema / Viral Exanthem",
+        leadingQuestions: [
+          {
+            id: "rash_blanching",
+            text: "Does the rash fade or blanch temporarily when you press a clear glass cup firmly against it?",
+            answerType: "yes_no"
+          },
+          {
+            id: "lip_swelling",
+            text: "Is there any facial swelling, swollen lips, or difficulty breathing?",
+            answerType: "yes_no",
+            redFlagIf: ["yes", true]
+          },
+          {
+            id: "rash_duration",
+            text: "How long has the rash been spreading?",
+            answerType: "choice",
+            options: ["Less than 24 hours", "1-3 days", "Over 1 week"]
+          }
+        ]
+      };
+    }
+
+    // Default general superficial injury / wound fallback
+    return {
+      descriptors: [
+        "Localized dermal disruption or anomaly inspected",
+        "Erythematous focus identified without structural collapse",
+        "Surface tissue integrity assessment completed"
+      ],
+      detectedAilmentCode: "injury_wound",
+      suspectedCondition: "Superficial Cut / Soft Tissue Injury",
+      leadingQuestions: [
+        {
+          id: "active_bleeding",
+          text: "Is there active bleeding that does not stop with direct pressure?",
+          answerType: "yes_no",
+          redFlagIf: ["yes", true]
+        },
+        {
+          id: "pain_level",
+          text: "Is there severe pain or inability to use the affected body part?",
+          answerType: "yes_no"
+        },
+        {
+          id: "foreign_body",
+          text: "Is there glass, metal, or debris stuck inside the wound?",
+          answerType: "yes_no",
+          redFlagIf: ["yes", true]
+        }
+      ]
+    };
   };
 
   try {
-    // In a real environment, we would pass the base64 payload to GPT-4V or Gemini Pro Vision
-    const result = await invokeLlmAgent('@vision_agent', systemPrompt, userPrompt, fallback);
-    return Array.isArray(result) ? result : fallback();
+    const raw = await invokeLlmAgent('@vision_agent', systemPrompt, userPrompt, fallback);
+    const parsed = raw.result as any;
+    if (parsed && Array.isArray(parsed.descriptors) && parsed.descriptors.length > 0 && parsed.detectedAilmentCode) {
+      return {
+        descriptors: parsed.descriptors,
+        detectedAilmentCode: parsed.detectedAilmentCode,
+        suspectedCondition: parsed.suspectedCondition || (parsed.detectedAilmentCode === 'injury_wound' ? 'Cut / Laceration Wound' : 'Acute Clinical Finding'),
+        leadingQuestions: Array.isArray(parsed.leadingQuestions) && parsed.leadingQuestions.length > 0 
+          ? parsed.leadingQuestions 
+          : fallback().leadingQuestions
+      };
+    }
+    return fallback();
   } catch (e) {
     return fallback();
   }

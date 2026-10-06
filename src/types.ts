@@ -253,6 +253,8 @@ export interface TriageResult {
   otcMedications?: string[];
   homeCare?: string[];
   telemedPartners?: string[];
+  medicationDoseByAge?: Record<string, string>;
+  medicationFrequency?: string;
   homeMedicationAdvice?: {
     medicationName: string;
     dosageInstruction: string;

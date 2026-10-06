@@ -326,8 +326,7 @@ export const CaregiverSchedulerModal: React.FC<CaregiverSchedulerModalProps> = (
           {/* TAB 3: Delivery History Log */}
           {activeTab === 'history' && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Persisted in SQLite database (`caregiver_alerts` table) with audit trail.</span>
+              <div className="flex items-center justify-end text-xs text-slate-500">
                 <span className="font-mono font-bold text-teal-600">{alerts.length} Total Dispatched</span>
               </div>
 

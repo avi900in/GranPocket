@@ -356,6 +356,51 @@ export async function saveTriageAssessmentToDb(assessment: any): Promise<boolean
   }
 }
 
+export async function fetchTriageDecisionFromDb(ailmentCode: string, severity: string): Promise<{
+  action?: string;
+  otcMedications?: string[];
+  homeCare?: string[];
+  telemedPartners?: string[];
+  doses?: Record<string, string>;
+  frequency?: string;
+} | null> {
+  try {
+    const res = await fetch(`/api/triage/decision?ailmentCode=${encodeURIComponent(ailmentCode)}&severity=${encodeURIComponent(severity)}`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.decision || null;
+  } catch (err) {
+    console.warn('[dbService] Error fetching triage decision from DB:', err);
+    return null;
+  }
+}
+export async function fetchAllTriageDecisionsFromDb(): Promise<any[]> {
+  try {
+    const res = await fetch('/api/triage/decisions');
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.decisions || [];
+  } catch (err) {
+    console.warn('[dbService] Error fetching all triage decisions:', err);
+    return [];
+  }
+}
+
+export async function saveTriageDecisionToDb(decision: any): Promise<boolean> {
+  try {
+    const res = await fetch('/api/triage/decisions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(decision),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[dbService] Error saving triage decision to DB:', err);
+    return false;
+  }
+}
+
+
 // 15. Home & First-Aid Medication APIs
 export async function fetchHomeMedicationsFromDb(): Promise<import('../types').HomeMedicationSuggestion[]> {
   try {
@@ -425,6 +470,33 @@ export async function deleteHomeMedicationInDb(id: string): Promise<boolean> {
     return res.ok;
   } catch (err) {
     console.error('[dbService] Error deleting home medication from DB:', err);
+    return false;
+  }
+}
+
+// 18. Facilities & Hospitals Database API
+export async function fetchFacilitiesFromDb(): Promise<HospitalFacility[]> {
+  try {
+    const res = await fetch('/api/db/facilities');
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.facilities || [];
+  } catch (err) {
+    console.warn('[dbService] Error fetching facilities from DB:', err);
+    return [];
+  }
+}
+
+export async function saveFacilityToDb(facility: HospitalFacility): Promise<boolean> {
+  try {
+    const res = await fetch('/api/db/facilities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(facility),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[dbService] Error saving facility to DB:', err);
     return false;
   }
 }

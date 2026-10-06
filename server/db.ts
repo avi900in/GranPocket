@@ -177,6 +177,7 @@ db.exec(`
     language TEXT,
     has_login INTEGER,
     phone TEXT,
+    postal_code TEXT,
     system_role TEXT,
     avatar TEXT,
     active_complaint TEXT,
@@ -199,6 +200,8 @@ db.exec(`
     emergency_services TEXT,
     wait_time_min INTEGER,
     specialty_notes TEXT,
+    has_ed INTEGER DEFAULT 1,
+    insurer_panels TEXT DEFAULT '[]',
     updated_at TEXT NOT NULL
   );
 
@@ -345,6 +348,15 @@ db.exec(`
     otc_medications_json TEXT NOT NULL,
     home_care_json TEXT NOT NULL,
     telemed_partners_json TEXT NOT NULL,
+    dose_neonate TEXT DEFAULT 'N/A',
+    dose_young_infant TEXT DEFAULT 'N/A',
+    dose_infant TEXT DEFAULT 'N/A',
+    dose_toddler TEXT DEFAULT '2.5ml',
+    dose_child TEXT DEFAULT '5ml',
+    dose_adolescent TEXT DEFAULT '10ml',
+    dose_adult TEXT DEFAULT '10ml',
+    dose_elderly TEXT DEFAULT '10ml',
+    frequency TEXT DEFAULT 'N/A',
     UNIQUE(ailment_code, severity)
   );
 `);
@@ -374,6 +386,40 @@ try {
   }
   if (!kbTableInfo.some(col => col.name === 'clinician_review_reason')) {
     db.exec("ALTER TABLE kb_proposals ADD COLUMN clinician_review_reason TEXT");
+  }
+} catch (e) {
+  // 忽略已存在列错误
+}
+
+// 数据库迁移：添加 postal_code 列到 persons（如果不存在）
+try {
+  const personsTableInfo = db.prepare("PRAGMA table_info(persons)").all() as Array<{ name: string }>;
+  if (!personsTableInfo.some(col => col.name === 'postal_code')) {
+    db.exec("ALTER TABLE persons ADD COLUMN postal_code TEXT");
+  }
+} catch (e) {
+  // 忽略已存在列错误
+}
+
+// 数据库迁移：添加剂量与频次列到 triage_decisions（如果不存在）
+try {
+  const tdInfo = db.prepare("PRAGMA table_info(triage_decisions)").all() as Array<{ name: string }>;
+  const tdCols = tdInfo.map(c => c.name);
+  const newTdCols = [
+    { name: 'dose_neonate', dflt: "'N/A'" },
+    { name: 'dose_young_infant', dflt: "'N/A'" },
+    { name: 'dose_infant', dflt: "'N/A'" },
+    { name: 'dose_toddler', dflt: "'2.5ml'" },
+    { name: 'dose_child', dflt: "'5ml'" },
+    { name: 'dose_adolescent', dflt: "'10ml'" },
+    { name: 'dose_adult', dflt: "'10ml'" },
+    { name: 'dose_elderly', dflt: "'10ml'" },
+    { name: 'frequency', dflt: "'N/A'" }
+  ];
+  for (const col of newTdCols) {
+    if (!tdCols.includes(col.name)) {
+      db.exec(`ALTER TABLE triage_decisions ADD COLUMN ${col.name} TEXT DEFAULT ${col.dflt}`);
+    }
   }
 } catch (e) {
   // 忽略已存在列错误
@@ -556,9 +602,9 @@ export function seedAllDatasetsIfEmpty(): void {
       const insertPersonStmt = db.prepare(`
         INSERT OR REPLACE INTO persons (
           id, household_id, name, dob, sex, relationship_label, language,
-          has_login, phone, system_role, avatar, active_complaint,
+          has_login, phone, postal_code, system_role, avatar, active_complaint,
           medical_profile, insurance, care_links, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       const tx = db.transaction(() => {
@@ -573,6 +619,7 @@ export function seedAllDatasetsIfEmpty(): void {
             p.language || 'en',
             p.hasLogin ? 1 : 0,
             p.phone || null,
+            p.postalCode || null,
             p.systemRole || 'MEMBER',
             p.avatar || '👤',
             p.activeComplaint || null,
@@ -1252,6 +1299,7 @@ export function getAllPersons(): Person[] {
     language: r.language,
     hasLogin: r.has_login === 1,
     phone: r.phone,
+    postalCode: r.postal_code,
     systemRole: r.system_role,
     avatar: r.avatar,
     activeComplaint: r.active_complaint,
@@ -1274,6 +1322,7 @@ export function getPersonById(id: string): Person | undefined {
     language: r.language,
     hasLogin: r.has_login === 1,
     phone: r.phone,
+    postalCode: r.postal_code,
     systemRole: r.system_role,
     avatar: r.avatar,
     activeComplaint: r.active_complaint,
@@ -1287,9 +1336,9 @@ export function savePerson(p: Person): boolean {
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO persons (
       id, household_id, name, dob, sex, relationship_label, language,
-      has_login, phone, system_role, avatar, active_complaint,
+      has_login, phone, postal_code, system_role, avatar, active_complaint,
       medical_profile, insurance, care_links, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run(
     p.id,
@@ -1301,6 +1350,7 @@ export function savePerson(p: Person): boolean {
     p.language || 'en',
     p.hasLogin ? 1 : 0,
     p.phone || null,
+    p.postalCode || null,
     p.systemRole || 'MEMBER',
     p.avatar || '👤',
     p.activeComplaint || null,
@@ -1356,15 +1406,46 @@ export function getAllFacilities(): HospitalFacility[] {
     id: r.id,
     name: r.name,
     type: r.type,
-    lat: r.lat,
-    lng: r.lng,
+    lat: Number(r.lat) || 1.3521,
+    lng: Number(r.lng) || 103.8198,
     address: r.address,
-    phone: r.phone,
+    phone: r.phone || '',
+    hasED: r.has_ed !== 0 && r.has_ed !== false,
+    hours: r.has_ed ? '24 Hours Emergency' : 'Standard Clinic Hours',
     openingHours: JSON.parse(r.opening_hours || '{}'),
     emergencyServices: JSON.parse(r.emergency_services || '[]'),
     waitTimeMin: r.wait_time_min,
-    specialtyNotes: r.specialty_notes,
+    waitTimeMinutes: r.wait_time_min || (r.has_ed ? 35 : 15),
+    specialtyNotes: r.specialty_notes || '',
+    insurerPanel: JSON.parse(r.insurer_panels || '[]'),
+    panels: JSON.parse(r.insurer_panels || '[]')
   }));
+}
+
+export function saveFacility(facility: HospitalFacility): boolean {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO facilities (
+      id, name, type, lat, lng, address, phone, opening_hours,
+      emergency_services, wait_time_min, specialty_notes, has_ed, insurer_panels, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    facility.id || `fac-${Date.now()}`,
+    facility.name,
+    facility.type,
+    facility.lat,
+    facility.lng,
+    facility.address,
+    facility.phone || '',
+    JSON.stringify(facility.hours ? { hours: facility.hours } : {}),
+    JSON.stringify(facility.specialties || []),
+    facility.waitTimeMinutes || null,
+    facility.specialtyNotes || null,
+    facility.hasED ? 1 : 0,
+    JSON.stringify(facility.insurerPanel || facility.panels || []),
+    new Date().toISOString()
+  );
+  return true;
 }
 
 // --- 临床安全护栏配置 (Spec §6) ---
@@ -2219,6 +2300,91 @@ export function getTriageQuestions(ailmentCode: string, isChild: boolean): any[]
   }
 }
 
+export function getAllTriageDecisions(): any[] {
+  try {
+    const rows = db.prepare('SELECT * FROM triage_decisions ORDER BY ailment_code ASC, severity ASC').all() as any[];
+    return rows.map(row => ({
+      id: row.id,
+      ailmentCode: row.ailment_code,
+      severity: row.severity,
+      action: row.status_action,
+      otcMedications: JSON.parse(row.otc_medications_json || '[]'),
+      homeCare: JSON.parse(row.home_care_json || '[]'),
+      telemedPartners: JSON.parse(row.telemed_partners_json || '[]'),
+      doses: {
+        neonate: row.dose_neonate || 'N/A',
+        young_infant: row.dose_young_infant || 'N/A',
+        infant: row.dose_infant || 'N/A',
+        toddler: row.dose_toddler || '2.5ml',
+        child: row.dose_child || '5ml',
+        adolescent: row.dose_adolescent || '10ml',
+        adult: row.dose_adult || '10ml',
+        elderly: row.dose_elderly || '10ml'
+      },
+      frequency: row.frequency || 'N/A'
+    }));
+  } catch (e) {
+    console.error('Error fetching all triage decisions:', e);
+    return [];
+  }
+}
+
+export function saveTriageDecision(item: {
+  id?: number;
+  ailmentCode: string;
+  severity: string;
+  action: string;
+  otcMedications: string[];
+  homeCare: string[];
+  telemedPartners: string[];
+  doses: Record<string, string>;
+  frequency: string;
+}): boolean {
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO triage_decisions (
+        ailment_code, severity, status_action, otc_medications_json, home_care_json, telemed_partners_json,
+        dose_neonate, dose_young_infant, dose_infant, dose_toddler, dose_child, dose_adolescent, dose_adult, dose_elderly, frequency
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(ailment_code, severity) DO UPDATE SET
+        status_action = excluded.status_action,
+        otc_medications_json = excluded.otc_medications_json,
+        home_care_json = excluded.home_care_json,
+        telemed_partners_json = excluded.telemed_partners_json,
+        dose_neonate = excluded.dose_neonate,
+        dose_young_infant = excluded.dose_young_infant,
+        dose_infant = excluded.dose_infant,
+        dose_toddler = excluded.dose_toddler,
+        dose_child = excluded.dose_child,
+        dose_adolescent = excluded.dose_adolescent,
+        dose_adult = excluded.dose_adult,
+        dose_elderly = excluded.dose_elderly,
+        frequency = excluded.frequency
+    `);
+    stmt.run(
+      item.ailmentCode,
+      item.severity,
+      item.action,
+      JSON.stringify(item.otcMedications || []),
+      JSON.stringify(item.homeCare || []),
+      JSON.stringify(item.telemedPartners || []),
+      item.doses?.neonate || 'N/A',
+      item.doses?.young_infant || 'N/A',
+      item.doses?.infant || 'N/A',
+      item.doses?.toddler || '2.5ml',
+      item.doses?.child || '5ml',
+      item.doses?.adolescent || '10ml',
+      item.doses?.adult || '10ml',
+      item.doses?.elderly || '10ml',
+      item.frequency || 'N/A'
+    );
+    return true;
+  } catch (e) {
+    console.error('Error saving triage decision:', e);
+    return false;
+  }
+}
+
 export function getTriageDecision(ailmentCode: string, severity: string): any {
   try {
     const row = db.prepare('SELECT * FROM triage_decisions WHERE ailment_code = ? AND severity = ?').get(ailmentCode, severity) as any;
@@ -2227,7 +2393,18 @@ export function getTriageDecision(ailmentCode: string, severity: string): any {
         action: row.status_action,
         otcMedications: JSON.parse(row.otc_medications_json),
         homeCare: JSON.parse(row.home_care_json),
-        telemedPartners: JSON.parse(row.telemed_partners_json)
+        telemedPartners: JSON.parse(row.telemed_partners_json),
+        doses: {
+          neonate: row.dose_neonate || 'N/A',
+          young_infant: row.dose_young_infant || 'N/A',
+          infant: row.dose_infant || 'N/A',
+          toddler: row.dose_toddler || '2.5ml',
+          child: row.dose_child || '5ml',
+          adolescent: row.dose_adolescent || '10ml',
+          adult: row.dose_adult || '10ml',
+          elderly: row.dose_elderly || '10ml'
+        },
+        frequency: row.frequency || 'N/A'
       };
     }
     return null;
