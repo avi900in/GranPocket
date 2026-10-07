@@ -40,16 +40,28 @@ export async function invokeLlmAgent<T>(
   agentName: string,
   systemPrompt: string,
   userPrompt: string,
-  fallbackGenerator: () => T
+  fallbackGenerator?: (errorReason?: string) => T
 ): Promise<{ result: T; source: 'llm_dynamic' | 'dynamic_reasoning_engine'; rawLlmText?: string }> {
+  let lastErrorDetail = '';
   try {
     let apiKey = process.env.OPENROUTER_API_KEY || process.env.GROQ_API_KEY || process.env.CODEBUDDY_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      lastErrorDetail = 'No LLM API key configured in environment (OPENROUTER_API_KEY / GROQ_API_KEY / OPENAI_API_KEY missing).';
+    }
     
     let baseUrl = 'https://api.openai.com/v1';
     let defaultModel = 'claude-sonnet-4';
     
-    const jarvisAgents = ['@ingestion_agent', '@data_architect_agent', '@ml_mining_agent', '@rule_engine_agent', '@orchestrator_agent'];
-    const isJarvisAgent = jarvisAgents.includes(agentName);
+    const jarvisAgents = [
+      'ingestion_agent',
+      'data_architect_agent',
+      'ml_mining_agent',
+      'triage_analyst_agent',
+      'rule_engine_agent',
+      'orchestrator_agent'
+    ];
+    const normalizedAgentName = agentName.replace(/^@/, '');
+    const isJarvisAgent = jarvisAgents.includes(normalizedAgentName);
     
     // Jarvis agents use OpenRouter/Nemotron, Triage agents use Groq
     if (isJarvisAgent && process.env.OPENROUTER_API_KEY) {
@@ -113,9 +125,9 @@ export async function invokeLlmAgent<T>(
 
         response = await makeCall(modelToTry);
 
-        // 2. If still 429 or fails, switch to qwen/qwen3.8-27b
+        // 2. If still 429 or fails, switch model
         if (!response.ok && response.status === 429) {
-          const fallbackModel = 'qwen/qwen3.8-27b';
+          const fallbackModel = isJarvisAgent ? 'nvidia/nemotron-3.5-lightning:free' : 'qwen/qwen3.8-27b';
           console.warn(`[DynamicAgent ${agentName}] Retry on ${modelToTry} failed with 429. Switching model to ${fallbackModel}...`);
           response = await makeCall(fallbackModel);
         }
@@ -124,23 +136,39 @@ export async function invokeLlmAgent<T>(
       if (response.ok) {
         const data = await response.json();
         const content = data.choices?.[0]?.message?.content || '';
-        // Extract JSON block from LLM output
-        const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, content];
-        const parsed = JSON.parse(jsonMatch[1].trim());
-        return { result: parsed as T, source: 'llm_dynamic', rawLlmText: content };
+        try {
+          // Extract JSON block from LLM output
+          const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, content];
+          const parsed = JSON.parse(jsonMatch[1].trim());
+          return { result: parsed as T, source: 'llm_dynamic', rawLlmText: content };
+        } catch (jsonErr: any) {
+          lastErrorDetail = `Invalid JSON response from model ${modelToTry}: ${jsonErr.message}. Raw output: ${content.substring(0, 250)}`;
+          console.warn(`[DynamicAgent ${agentName}] JSON parse error:`, lastErrorDetail);
+        }
       } else {
         const errorText = await response.text();
+        let parsedMsg = errorText;
+        try {
+          const jsonErr = JSON.parse(errorText);
+          parsedMsg = jsonErr?.error?.message || jsonErr?.message || errorText;
+        } catch {}
+        lastErrorDetail = `HTTP ${response.status} from ${baseUrl} (model: ${modelToTry}): ${parsedMsg}`;
         console.warn(`[DynamicAgent ${agentName}] LLM call failed with HTTP ${response.status}: ${errorText}`);
       }
     }
   } catch (err: any) {
+    lastErrorDetail = `Network/runtime exception calling ${agentName}: ${err?.message || String(err)}`;
     console.warn(`[DynamicAgent ${agentName}] LLM execution encountered error:`, err?.message);
   }
 
-  // 3. If all LLM calls fail, provide safe, clinically valid fallback
-  console.log(`[DynamicAgent ${agentName}] Invoking graceful clinical reasoning fallback engine.`);
-  const dynamicResult = fallbackGenerator();
-  return { result: dynamicResult, source: 'dynamic_reasoning_engine' };
+  // 3. Fallback or diagnostic throw
+  if (fallbackGenerator) {
+    console.log(`[DynamicAgent ${agentName}] Invoking fallback handler with error detail.`);
+    const dynamicResult = fallbackGenerator(lastErrorDetail);
+    return { result: dynamicResult, source: 'dynamic_reasoning_engine' };
+  }
+
+  throw new Error(`[${agentName}] Execution failed: ${lastErrorDetail || 'Unknown LLM failure'}`);
 }
 
 // =========================================================================
@@ -544,7 +572,23 @@ Output strictly in JSON format:
       });
     }
 
-    // 15. Fallback for generic text if nothing else matched
+    // 15. Sore Throat / Pharyngitis / Tonsillitis
+    if (text.includes('sore throat') || text.includes('throat pain') || text.includes('pharyng') || text.includes('tonsil') || text.includes('throat')) {
+      extractions.push({
+        source_id: 'decipher-' + uuidv4().substring(0, 8),
+        entity_type: 'symptom',
+        raw_text: 'sore throat / acute pharyngitis',
+        trigger_keywords: ['sore throat', 'throat pain', 'throat', 'pharyngitis', 'tonsillitis'],
+        normalized_term: 'Acute pharyngitis / Sore throat',
+        code_system: 'ICD-10',
+        code: 'J02.9',
+        confidence: 0.95,
+        is_emergency_escalation: false,
+        requires_clinician_review: false,
+      });
+    }
+
+    // 16. Fallback for generic text if nothing else matched
     if (extractions.length === 0) {
       extractions.push({
         source_id: 'decipher-' + uuidv4().substring(0, 8),
@@ -910,6 +954,11 @@ export async function executeDynamicKnowledgeAgent(
           return true;
         }
       }
+      if (lowerRaw.includes('throat') || lowerRaw.includes('pharyng') || lowerRaw.includes('tonsil') || lowerRaw.includes('swallow')) {
+        if (r.ruleId.includes('THROAT') || r.conditionId?.toLowerCase().includes('pharyng') || r.bodyPart?.toLowerCase().includes('throat') || r.bodyPart?.toLowerCase().includes('ent')) {
+          return true;
+        }
+      }
     }
     return false;
   });
@@ -922,6 +971,9 @@ export async function executeDynamicKnowledgeAgent(
     if (lowerRaw.includes('foot') || lowerRaw.includes('ankle') || lowerRaw.includes('knee') || lowerRaw.includes('leg') || lowerRaw.includes('sprain') || lowerRaw.includes('injury') || lowerRaw.includes('trauma') || lowerRaw.includes('fracture') || lowerRaw.includes('wound')) {
       const injuryRules = allDbRules.filter(r => r.ailment === 'injury_wound' || r.bodyPart?.toLowerCase().includes('musculoskeletal') || r.bodyPart?.toLowerCase().includes('extremity'));
       matchedRules = injuryRules.length > 0 ? injuryRules.slice(0, 3) : [];
+    } else if (lowerRaw.includes('throat') || lowerRaw.includes('pharyng') || lowerRaw.includes('tonsil') || lowerRaw.includes('swallow')) {
+      const throatRules = allDbRules.filter(r => r.ruleId.includes('THROAT') || r.bodyPart?.toLowerCase().includes('throat') || r.bodyPart?.toLowerCase().includes('ent'));
+      matchedRules = throatRules.length > 0 ? throatRules.slice(0, 3) : [];
     }
     // Zero match: do not force arbitrary respiratory/cold rules. Keep matchedRules as empty array.
   }
@@ -1034,12 +1086,22 @@ ${revisionFeedback ? `MANDATORY REVISION REQUEST FROM SENIOR DOCTOR: "${revision
       confidence = 88;
     }
 
+    // Preliminary draft vs revision for sore throat cases
+    const isSoreThroatCase = (complaintLower.includes('throat') || complaintLower.includes('pharyng') || answers.sore_throat === true);
+    if (isSoreThroatCase && !revisionFeedback) {
+      classification = 'HOME_MONITOR';
+      mappedSeverity = 'GREEN';
+      confidence = 84;
+      rationale = 'Preliminary draft: Acute pharyngitis / sore throat symptoms initially considered suitable for supportive home monitoring with oral hydration and OTC lozenges.';
+    }
+
     // Incorporate revision feedback if provided by @expert_doctor_agent
     if (revisionFeedback) {
-      if (revisionFeedback.toLowerCase().includes('escalate') || revisionFeedback.toLowerCase().includes('home_monitor')) {
+      if (revisionFeedback.toLowerCase().includes('escalate') || revisionFeedback.toLowerCase().includes('home_monitor') || revisionFeedback.toLowerCase().includes('teledoctor') || revisionFeedback.toLowerCase().includes('yellow') || revisionFeedback.toLowerCase().includes('orange')) {
         classification = 'TELEDOCTOR';
         mappedSeverity = 'YELLOW';
         confidence = 92;
+        rationale = 'Revised disposition following Senior Doctor Challenge: Escalated to Tele-Doctor / Polyclinic GP (Yellow Tier) for oropharyngeal inspection, Centor criteria assessment, and clinical review.';
       }
     }
 
@@ -1163,6 +1225,28 @@ Draft Disposition Under Review:
           },
         };
       }
+    }
+
+    // Check Pharyngitis / Sore Throat with dysphagia or fever
+    const promptLower = (userPrompt || '').toLowerCase();
+    const hasSoreThroat = answers.sore_throat === true || promptLower.includes('throat') || promptLower.includes('pharyng');
+    const hasDysphagiaOrFever = answers.difficulty_swallowing === true || answers.temp_c >= 37.5 || answers.fever === true || promptLower.includes('swallow') || promptLower.includes('fever');
+    if (hasSoreThroat && hasDysphagiaOrFever && draft.classification === 'HOME_MONITOR') {
+      missedDifferentials.push('Bacterial pharyngotonsillitis (Centor Criteria) / Peritonsillar abscess rule-out');
+      return {
+        status: 'CHALLENGE_FLAG',
+        reason: 'Sore throat with difficulty swallowing and fever presents risk of bacterial tonsillitis or peritonsillar collection; unsafe for unmonitored home care alone.',
+        required_revision: 'Escalate classification to TELEDOCTOR (YELLOW) for primary care physical examination and consideration of antibiotic therapy.',
+        contraindicationsChecked,
+        missedDifferentialsDetected: missedDifferentials,
+        adversarialChecklist: {
+          allergyConflict: false,
+          ageFloorViolated: false,
+          severityInconsistent: true,
+          pediatricAtypicalChecked: true,
+          geriatricMaskedChecked: true,
+        },
+      };
     }
 
     // Check Confidence Floor (Spec §6)

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { 
   FileCheck, 
-  ShieldCheck, 
   AlertTriangle, 
   ExternalLink, 
   Check, 
@@ -23,7 +22,6 @@ import {
   ChevronUp,
   Brain,
   Binary,
-  Database,
   FileText,
   Quote,
   Pill,
@@ -203,28 +201,16 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
       <div className="bg-white dark:bg-[#14212B] border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 dark:bg-teal-950/80 dark:text-teal-300">
-                Tier 4 Optimization & Governance
-              </span>
-              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300">
-                Spec §3 Deterministic Net
-              </span>
-              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 flex items-center gap-1 border border-emerald-300 dark:border-emerald-800">
-                <Database size={11} className="text-emerald-600 dark:text-emerald-400" />
-                <span>SQLite DB: data/chat.db</span>
-              </span>
-            </div>
-            <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center space-x-2 mt-1">
+            <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center space-x-2">
               <FileCheck className="text-teal-600 dark:text-teal-400" size={24} />
               <span>Override Rule Harvesting and Governance</span>
               <HelperInfoButton
                 title="Override Rule Harvesting and Governance"
                 content={
                   <div className="space-y-2">
-                    <p><strong>Deterministic Red-Flag Safety Net:</strong> Critical conditions (infant fever, red-flag injuries, anaphylaxis) bypass LLM probabilistic decision-making and are governed strictly by deterministic clinical override rules.</p>
+                    <p><strong>Deterministic Red-Flag Safety Net:</strong> Red-flag conditions bypass LLM hallucination risks via deterministic evaluation. Critical conditions (infant fever, red-flag injuries, anaphylaxis) bypass LLM probabilistic decision-making and are governed strictly by deterministic clinical override rules.</p>
                     <p><strong>AI Rule Harvesting:</strong> Uses automated agent pipelines (Tencent Cloud Multi-Agent ADP or local @decipher_agent) to harvest and propose clinical guidelines from authoritative medical sources.</p>
-                    <p><strong>SMC Clinician Gate:</strong> Every harvested rule or medication protocol requires explicit Singapore Medical Council (SMC) clinician review and cryptographic sign-off before entering production.</p>
+                    <p><strong>SMC Clinician Gate:</strong> Proposed rule modifications harvested by @decipher_agent and home medications extracted by @home_medication_agent require explicit Singapore Medical Council (SMC) clinician review and cryptographic sign-off before entering production.</p>
                   </div>
                 }
               />
@@ -448,24 +434,6 @@ export const ClinicalKbConsoleView: React.FC<ClinicalKbConsoleViewProps> = ({
               )}
             </button>
           </div>
-        </div>
-
-        {/* HSA Regulatory Compliance Banner */}
-        <div className="bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 rounded-2xl px-4 py-2.5 text-xs text-indigo-950 dark:text-indigo-200 flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <ShieldCheck size={18} className="text-indigo-700 dark:text-indigo-400 shrink-0" />
-            <span className="font-bold text-xs text-indigo-950 dark:text-indigo-200">
-              HSA Software-as-a-Medical-Device (SaMD) & Deterministic Safety Net Active
-            </span>
-            <span className="text-[10px] bg-indigo-200 dark:bg-indigo-900 text-indigo-900 dark:text-indigo-200 px-2 py-0.5 rounded-full font-bold hidden sm:inline-block">
-              Spec §1 Compliance
-            </span>
-          </div>
-          <HelperInfoButton
-            title="HSA SaMD Compliance (Spec §1)"
-            align="end"
-            content="Red-flag conditions bypass LLM hallucination risks via deterministic evaluation. Proposed rule modifications harvested by @decipher_agent and home medications extracted by @home_medication_agent require explicit SMC clinician cryptographic sign-off before entering production."
-          />
         </div>
       </div>
 

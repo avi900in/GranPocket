@@ -1619,7 +1619,7 @@ export default function App() {
             )}
 
             {/* TAB 5: Hospital & Clinic Finder */}
-            {activeTab === 'facilities' && (
+            {activeTab === 'facilities' && currentUser?.systemRole !== 'APP_OWNER' && (
               <HospitalFinderView
                 userAddressText={primaryAddress.text}
                 defaultPostal={primaryAddress.postalCode}
@@ -1633,7 +1633,7 @@ export default function App() {
 
 
             {/* TAB 7: PDPA & Audit Log */}
-            {activeTab === 'pdpa_audit' && (
+            {activeTab === 'pdpa_audit' && currentUser?.systemRole !== 'APP_OWNER' && (
               <AuditAndPdpaView
                 auditLogs={eligibleAuditLogs}
                 household={household}
@@ -1646,7 +1646,7 @@ export default function App() {
             )}
 
             {/* TAB 8: App Owner Administration & Integrations Hub */}
-            {(activeTab === 'owner_admin' || activeTab === 'app_workspace') && (
+            {(activeTab === 'owner_admin' || activeTab === 'app_workspace' || activeTab === 'clinical_kb' || currentUser?.systemRole === 'APP_OWNER') && (
               (allowedScreens.includes(activeTab as any) || currentUser?.systemRole === 'APP_OWNER') ? (
                 <AppOwnerPortalView
                   currentUser={currentUser}
@@ -1665,7 +1665,7 @@ export default function App() {
                   rolePermissions={rolePermissions}
                   onUpdateRolePermissions={handleSaveRolePermissions}
                   onResetRolePermissions={handleResetRolePermissions}
-                  menuMode={activeTab === 'owner_admin' ? 'clinical_lab' : 'app_workspace'}
+                  menuMode={(activeTab === 'owner_admin' || activeTab === 'clinical_kb') ? 'clinical_lab' : 'app_workspace'}
                   proposals={kbProposals}
                   onApproveProposal={handleApproveProposal}
                   onDeleteProposal={handleDeleteProposal}
@@ -1676,6 +1676,8 @@ export default function App() {
                       setKbProposals(dbProps);
                     }
                   }}
+                  auditLogs={eligibleAuditLogs}
+                  primaryAddress={primaryAddress}
                 />
               ) : (
                 <div className="bg-white border border-slate-200 rounded-3xl p-8 max-w-md mx-auto text-center space-y-4 shadow-sm my-12 animate-fadeIn">

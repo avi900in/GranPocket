@@ -39,4 +39,10 @@ yarn-error.log*
 
 # Zero byte or temporary db files in root
 /granpocket.db
+server/granpocket.db
 *.sqlite
+
+# Scratch and test files
+scratch_old_triageEngine.ts
+temp_akr.ts
+test-groq.ts

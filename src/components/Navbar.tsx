@@ -329,27 +329,29 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Navigation Tabs (Desktop & Tablet) */}
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 hidden md:flex items-center space-x-1.5 overflow-x-auto no-scrollbar border-t border-[#DDE5E9] dark:border-[#1E2D37] py-1.5">
-        {tabs.map(tab => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => onSelectTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all min-h-[40px] ${
-                isActive
-                  ? 'bg-[#0F766E] text-white shadow-sm'
-                  : 'text-[#52616B] dark:text-[#94A3B8] hover:text-[#14212B] dark:hover:text-[#F1F5F9] hover:bg-[#FAFBFA] dark:hover:bg-[#16232B]'
-              }`}
-            >
-              <Icon size={16} strokeWidth={isActive ? 2.5 : 2} />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* Navigation Tabs (Desktop & Tablet) - Hidden for App Owner who has dedicated Command Menu */}
+      {!isAppOwner && tabs.length > 0 && (
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 hidden md:flex items-center space-x-1.5 overflow-x-auto no-scrollbar border-t border-[#DDE5E9] dark:border-[#1E2D37] py-1.5">
+          {tabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => onSelectTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all min-h-[40px] ${
+                  isActive
+                    ? 'bg-[#0F766E] text-white shadow-sm'
+                    : 'text-[#52616B] dark:text-[#94A3B8] hover:text-[#14212B] dark:hover:text-[#F1F5F9] hover:bg-[#FAFBFA] dark:hover:bg-[#16232B]'
+                }`}
+              >
+                <Icon size={16} strokeWidth={isActive ? 2.5 : 2} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </header>
   );
 };

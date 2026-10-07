@@ -3,9 +3,8 @@ import { getResultPhrasing } from './grandmaVoice';
 import { runRuleBasedTriage } from './ruleBasedEngine';
 import { fetchTriageDecisionFromDb } from '../services/dbService';
 
-// These are now dynamic, fetched from DB
-export const AILMENTS: Ailment[] = [];
-export const EMERGENCY_KEYWORDS = {};
+// Master clinical ailments and emergency keywords
+export { AILMENTS, EMERGENCY_KEYWORDS } from './ruleBasedEngine';
 
 // Used to seed initial data in database
 // =========================================================================

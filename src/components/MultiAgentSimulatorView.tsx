@@ -224,12 +224,12 @@ export const MultiAgentSimulatorView: React.FC<MultiAgentSimulatorViewProps> = (
       expectedOutcome: 'RED (995 Ambulance)',
     },
     {
-      id: 'infant_fever',
-      name: 'Infant Fever & Doctor Adversarial Challenge (§3.1 & §5)',
-      targetPatientId: 'person-lucas',
-      complaintText: 'Lucas has high fever 38.8°C, irritable, refuses milk, but breathing is normal with no retractions',
-      answers: { fever: true, temp_c: 38.8, feeding_refusal: false, chest_retractions: false },
-      description: 'Tests Tier 3 Triage Agent conservative draft, followed by Tier 3 Expert Doctor CHALLENGE_FLAG (Age Hard-Stop) and forced revision to Tele-Doctor.',
+      id: 'adult_sore_throat',
+      name: 'Adult Sore Throat & Doctor Challenge Loop (§5)',
+      targetPatientId: 'person-david',
+      complaintText: 'David has painful sore throat and difficulty swallowing solids for 2 days, mild fever 37.8°C, no breathing difficulty or stridor',
+      answers: { sore_throat: true, difficulty_swallowing: true, fever: true, temp_c: 37.8, stridor: false, labored_breathing: false },
+      description: 'Tests Tier 3 Triage Agent conservative draft, followed by Tier 3 Expert Doctor CHALLENGE_FLAG and forced revision to Tele-Doctor.',
       badge: 'Doctor Challenge Loop',
       badgeColor: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300',
       expectedOutcome: 'YELLOW / ORANGE (Tele-Doctor)',
@@ -270,7 +270,7 @@ export const MultiAgentSimulatorView: React.FC<MultiAgentSimulatorViewProps> = (
   ];
 
   // Simulation Form State
-  const [selectedPatientId, setSelectedPatientId] = useState<string>(members[0]?.id || 'person-lucas');
+  const [selectedPatientId, setSelectedPatientId] = useState<string>('person-david');
   const [complaintText, setComplaintText] = useState<string>(PRESET_SCENARIOS[1].complaintText);
   const [answers, setAnswers] = useState<Record<string, any>>(PRESET_SCENARIOS[1].answers);
   const [activeScenarioId, setActiveScenarioId] = useState<string>(PRESET_SCENARIOS[1].id);

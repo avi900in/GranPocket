@@ -2240,7 +2240,14 @@ app.post('/api/agentic/swarm-harvest', async (req, res) => {
     res.write(`data: ${JSON.stringify({ log: 'Initializing Agent Swarm...' })}\n\n`);
     
     // Execute swarm
-    const swarmResult = await executeRuleHarvestingSwarm(inputData, dataType || 'text', sourceName || 'User Upload');
+    const swarmResult = await executeRuleHarvestingSwarm(
+      inputData,
+      dataType || 'text',
+      sourceName || 'User Upload',
+      (stageLog: string) => {
+        res.write(`data: ${JSON.stringify({ log: stageLog })}\n\n`);
+      }
+    );
     
     // Send final result
     res.write(`data: ${JSON.stringify({ log: 'Swarm processing complete', proposals: swarmResult.proposals || [] })}\n\n`);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ShieldCheck,
   Users,
@@ -72,13 +72,16 @@ import type {
   InsuranceCompany
 } from '../types';
 import { DEFAULT_ROLE_PERMISSIONS, ALL_SCREENS_META, CAPABILITIES_META } from '../data/defaultRbac';
-import { AILMENTS, RED_FLAG_RULES, AGENTIC_KNOWLEDGE_REPOSITORY } from '../engine/triageEngine';
+import { RED_FLAG_RULES, AGENTIC_KNOWLEDGE_REPOSITORY } from '../engine/triageEngine';
+import { AILMENTS } from '../engine/ruleBasedEngine';
 import { SINGAPORE_FACILITIES } from '../data/mockData';
 import { lookupSingaporePostalCode } from '../engine/singaporeData';
 import { MultiAgentSimulatorView } from './MultiAgentSimulatorView';
 import { ClinicalKbConsoleView } from './ClinicalKbConsoleView';
 import { AgenticKnowledgeHarvester } from './AgenticKnowledgeHarvester';
 import { HelperInfoButton } from './HelperInfoButton';
+import { AuditAndPdpaView } from './AuditAndPdpaView';
+import { HospitalFinderView } from './HospitalFinderView';
 import {
   fetchCustomerFeedback,
   fetchKeyStatistics,
@@ -114,6 +117,8 @@ interface AppOwnerPortalViewProps {
   onDeleteProposal?: (id: string) => void;
   onMoveToPendingProposal?: (id: string) => void;
   onRefreshProposals?: () => Promise<void>;
+  auditLogs?: any[];
+  primaryAddress?: any;
 }
 
 type SubTab = 
@@ -130,7 +135,9 @@ type SubTab =
   | 'triage_medications'
   | 'insurance' 
   | 'wearables'
-  | 'jarvis_arh';
+  | 'jarvis_arh'
+  | 'pdpa_audit'
+  | 'public_facilities';
 
 export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
   currentUser,
@@ -154,7 +161,9 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
   onApproveProposal,
   onDeleteProposal,
   onMoveToPendingProposal,
-  onRefreshProposals
+  onRefreshProposals,
+  auditLogs,
+  primaryAddress
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>(menuMode === 'clinical_lab' ? 'rules' : 'rbac');
   
@@ -509,7 +518,6 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
   const [ruleAgeBandFilter, setRuleAgeBandFilter] = useState<string>('ALL');
   const [ruleBodyPartFilter, setRuleBodyPartFilter] = useState<string>('ALL');
   const [ruleSearchQuery, setRuleSearchQuery] = useState<string>('');
-  const [showArchFlow, setShowArchFlow] = useState<boolean>(true);
 
   // Form State
   const [newRuleId, setNewRuleId] = useState(`RULE-${Date.now().toString().slice(-4)}`);
@@ -1260,6 +1268,110 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
     showToast('Fall alert cancelled: Patient confirmed "I am OK".');
   };
 
+  // ==========================================
+  // COMMAND CENTER NAVIGATION & METRICS
+  // ==========================================
+  const totalActiveRulesCount = useMemo(() => {
+    const ruleMap = new Map<string, any>();
+    (AGENTIC_KNOWLEDGE_REPOSITORY || []).forEach(r => ruleMap.set(r.ruleId, r));
+    (RED_FLAG_RULES || []).forEach(r => ruleMap.set(r.ruleId, r));
+    (customRules || []).forEach(r => ruleMap.set(r.ruleId, r));
+    return ruleMap.size;
+  }, [customRules]);
+
+  const pendingProposalsCount = useMemo(() => {
+    return (proposals || []).filter(p => p.status?.toLowerCase() !== 'approved').length;
+  }, [proposals]);
+
+  const handleSelectNav = (subTab: SubTab, view?: 'explorer' | 'ml_pipeline' | 'author' | 'unified') => {
+    setActiveSubTab(subTab);
+    if (view) {
+      setRuleBuilderView(view);
+    }
+  };
+
+  const isNavActive = (subTab: SubTab, view?: 'explorer' | 'ml_pipeline' | 'author' | 'unified') => {
+    if (subTab === 'rules') {
+      return activeSubTab === 'rules' && ruleBuilderView === (view || 'explorer');
+    }
+    return activeSubTab === subTab;
+  };
+
+  const getActiveNavMeta = () => {
+    if (activeSubTab === 'rules') {
+      if (ruleBuilderView === 'explorer') return { domain: 'Domain 1: Clinical Engine & Pathways', title: 'Rule Repository Explorer', desc: 'Browse, inspect, and toggle active states across all clinical triage rules in SQLite WAL storage.' };
+      if (ruleBuilderView === 'author') return { domain: 'Domain 1: Clinical Engine & Pathways', title: 'Manual Studio (Rule Authoring)', desc: 'Handcrafted authoring studio for bespoke clinical triage triggers and red-flag rules.' };
+      if (ruleBuilderView === 'unified') return { domain: 'Domain 1: Clinical Engine & Pathways', title: 'Unified Triage Pathways', desc: 'Directly unifies the Medical Engine (triage_rules) with UX decisions (triage_decisions) to show cause-and-effect.' };
+      if (ruleBuilderView === 'ml_pipeline') return { domain: 'Domain 1: Clinical Engine & Pathways', title: 'ML Pipeline & Ingestion', desc: 'Tier 4 asynchronous dataset ingestion and rule induction pipeline (Spec §4 & §5).' };
+    }
+    if (activeSubTab === 'harvesting') return { domain: 'Domain 1: Clinical Engine & Pathways', title: 'Override Rule Harvesting & Governance', desc: 'Review clinical guideline proposals with Tencent Cloud Agentic ADP / Local Agents & SMC Doctor Sign-off.' };
+    if (activeSubTab === 'jarvis_arh') return { domain: 'Domain 1: Clinical Engine & Pathways', title: 'Jarvis - Agentic Rule Harvester (ARH)', desc: 'Autonomous multi-agent document scraper and live streaming extraction pipeline.' };
+    if (activeSubTab === 'triage_medications') return { domain: 'Domain 2: Decisions, Safety & AI Lab', title: 'Deterministic Decisions & Medications Registry', desc: 'Master SQLite table for deterministic triage outcomes, OTC medications, and caregiver dosing schedules.' };
+    if (activeSubTab === 'guardrails') return { domain: 'Domain 2: Decisions, Safety & AI Lab', title: 'Clinical Safety Guardrails', desc: 'AI safety boundary governance: confidence floor, allergy hard-stops, and rule staleness limits.' };
+    if (activeSubTab === 'simulation') return { domain: 'Domain 2: Decisions, Safety & AI Lab', title: 'Agentic Triage Simulator', desc: 'Interactive sandbox testing patient complaints against multi-agent pipeline traces in real time.' };
+    if (activeSubTab === 'weather') return { domain: 'Domain 2: Decisions, Safety & AI Lab', title: 'Environmental & Dengue Surveillance', desc: 'Live NEA Singapore weather nowcast, PSI haze indices, and dengue cluster risk overlays.' };
+    if (activeSubTab === 'hospitals') return { domain: 'Domain 3: Registries & Hardware', title: 'Singapore Hospital & A&E Registry', desc: 'Administrative registry of hospitals and urgent care clinics with postal code auto-lookup.' };
+    if (activeSubTab === 'insurance') return { domain: 'Domain 3: Registries & Hardware', title: 'Insurance & Panel Registry', desc: 'Singapore Integrated Shield Plans, panel clinic directories, and MediSave claim limits.' };
+    if (activeSubTab === 'bluetooth') return { domain: 'Domain 3: Registries & Hardware', title: 'Bluetooth Medical Devices (BLE)', desc: 'Hardware IoT connectivity for blood pressure monitors, pulse oximeters, and glucometers.' };
+    if (activeSubTab === 'wearables') return { domain: 'Domain 3: Registries & Hardware', title: 'Known Wearables Cloud Sync', desc: 'Consumer wearable cloud ecosystem (Apple HealthKit, Garmin, Fitbit, Health Connect).' };
+    if (activeSubTab === 'rbac') return { domain: 'Domain 4: Platform & Compliance', title: 'RBAC & Permission Matrix', desc: 'System-wide role permissions, screen visibility, and 10 capability access tiers.' };
+    if (activeSubTab === 'statistics') return { domain: 'Domain 4: Platform & Compliance', title: 'Key Platform Analytics & KPIs', desc: 'Operational dashboard tracking triage inquiries, 995 emergency dispatches, and engine latency.' };
+    if (activeSubTab === 'feedback') return { domain: 'Domain 4: Platform & Compliance', title: 'Customer Feedback Hub', desc: 'Patient and household ratings, reviews, and clinical governance feedback resolution.' };
+    if (activeSubTab === 'pdpa_audit') return { domain: 'Domain 4: Platform & Compliance', title: 'Cryptographic Audit Trail & PDPA Privacy', desc: 'Tamper-evident SHA-256 cryptographic logs, consent tracking, and PDPA data portability/erasure.' };
+    if (activeSubTab === 'public_facilities') return { domain: 'Domain 3: Registries & Hardware', title: 'Public Hospital Finder (Live Map & GPS)', desc: 'Interactive Singapore SLA map with real-time nearest A&E clinic distances and live wait times.' };
+    return { domain: 'App Owner Portal', title: 'Command Center', desc: 'Central governance dashboard for Medical Director and Platform Owner.' };
+  };
+
+  const navDomains = [
+    {
+      id: 'domain_1',
+      title: '1. Clinical Engine & Pathways',
+      icon: Sliders,
+      items: [
+        { id: 'rules' as SubTab, view: 'explorer' as const, label: 'Rule Repository', icon: Database, badge: totalActiveRulesCount ? `${totalActiveRulesCount}` : undefined },
+        { id: 'rules' as SubTab, view: 'author' as const, label: 'Manual Studio', icon: Plus },
+        { id: 'rules' as SubTab, view: 'unified' as const, label: 'Unified Pathways', icon: Layers, pill: 'Bridge' },
+        { id: 'rules' as SubTab, view: 'ml_pipeline' as const, label: 'ML Pipeline & Ingestion', icon: Brain, pill: 'AI Harvest' },
+        { id: 'harvesting' as SubTab, label: 'Override Rule Harvesting', icon: FileCheck, badge: pendingProposalsCount > 0 ? `${pendingProposalsCount}` : undefined, badgeColor: 'bg-amber-400 text-slate-950' },
+        { id: 'jarvis_arh' as SubTab, label: 'Jarvis - ARH', icon: BrainCircuit },
+      ]
+    },
+    {
+      id: 'domain_2',
+      title: '2. Decisions, Safety & AI Lab',
+      icon: Shield,
+      items: [
+        { id: 'triage_medications' as SubTab, label: 'Deterministic Decisions & Meds', icon: Pill },
+        { id: 'guardrails' as SubTab, label: 'Clinical Guardrails', icon: Shield },
+        { id: 'simulation' as SubTab, label: 'Agentic Triage Simulator', icon: Bot, pill: 'Live Trace' },
+        { id: 'weather' as SubTab, label: 'Environmental Surveillance', icon: CloudSun },
+      ]
+    },
+    {
+      id: 'domain_3',
+      title: '3. Registries & Hardware',
+      icon: Building2,
+      items: [
+        { id: 'hospitals' as SubTab, label: 'Hospital & A&E Registry', icon: Building2, badge: allFacilities.length ? `${allFacilities.length}` : undefined },
+        { id: 'public_facilities' as SubTab, label: 'Public Hospital Finder (Map)', icon: MapPin },
+        { id: 'insurance' as SubTab, label: 'Insurance & Panel Registry', icon: CreditCard, badge: insuranceCompanies.length ? `${insuranceCompanies.length}` : undefined },
+        { id: 'bluetooth' as SubTab, label: 'Bluetooth BLE Devices', icon: Bluetooth },
+        { id: 'wearables' as SubTab, label: 'Known Wearables Cloud', icon: Watch },
+      ]
+    },
+    {
+      id: 'domain_4',
+      title: '4. Platform & Compliance',
+      icon: Users,
+      items: [
+        { id: 'rbac' as SubTab, label: 'RBAC & Permissions Matrix', icon: Users },
+        { id: 'statistics' as SubTab, label: 'Key Statistics & KPIs', icon: BarChart3 },
+        { id: 'feedback' as SubTab, label: 'Customer Feedback Hub', icon: MessageSquareHeart, badge: feedbackList.length > 0 ? `${feedbackList.length}` : undefined },
+        { id: 'pdpa_audit' as SubTab, label: 'Audit Trail & PDPA Privacy', icon: ShieldCheck },
+      ]
+    }
+  ];
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-20 animate-fadeIn">
       {/* Toast Notification */}
@@ -1270,281 +1382,253 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
         </div>
       )}
 
-      {/* Top Banner: App Owner Governance Dashboard */}
-      <div className="bg-gradient-to-r from-indigo-900 via-slate-900 to-teal-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-indigo-700/30 relative overflow-visible z-20">
-        <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl -mr-20 -mt-20"></div>
-        </div>
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="inline-flex items-center gap-2 bg-indigo-500/20 text-indigo-200 text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider border border-indigo-400/30">
-              <Shield size={14} className="text-teal-400" />
-              <span>{menuMode === 'clinical_lab' ? 'App Owner Clinical Lab' : 'App Workspace Administration & Integrations Hub'}</span>
+      {/* ========================================================================= */}
+      {/* EXECUTIVE TOP COCKPIT BANNER */}
+      {/* ========================================================================= */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-teal-950 text-white rounded-3xl p-5 sm:p-7 shadow-xl border border-indigo-700/30 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
+        
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-700/60">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-500 to-indigo-600 flex items-center justify-center text-2xl shadow-lg border border-teal-300/30 shrink-0">
+              👩🏻‍⚕️
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-3">
-              <span>{currentUser?.name || 'Dr. Evelyn Lim'}</span>
-              <span className="text-xs bg-teal-500/30 text-teal-300 font-bold px-2.5 py-0.5 rounded-md border border-teal-400/30">
-                SMC M12849J
-              </span>
-            </h1>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xl sm:text-2xl font-black text-white">
+                  {currentUser?.name || 'Dr. Evelyn Lim'}
+                </span>
+                <span className="text-xs bg-teal-500/30 text-teal-300 font-bold px-2.5 py-0.5 rounded-md border border-teal-400/30">
+                  SMC M12849J
+                </span>
+                <span className="text-[10px] bg-indigo-500/30 text-indigo-200 font-black px-2 py-0.5 rounded-full uppercase tracking-wider border border-indigo-400/30">
+                  Medical Director & Platform Owner
+                </span>
+              </div>
+              <div className="text-xs text-slate-300 flex items-center gap-2 mt-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Deterministic Clinical Safety Net Active</span>
+                <span className="text-slate-500">•</span>
+                <span className="font-mono text-[11px] text-teal-300">SQLite: data/chat.db</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Action Shortcuts */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => handleSelectNav('harvesting')}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-teal-500 hover:bg-teal-400 text-slate-950 transition-all flex items-center gap-1.5 shadow-md active:scale-95"
+            >
+              <FileCheck size={14} />
+              <span>SMC Sign-Off</span>
+              {pendingProposalsCount > 0 && (
+                <span className="bg-slate-950 text-teal-300 text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                  {pendingProposalsCount}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectNav('rules', 'unified')}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white transition-all flex items-center gap-1.5 border border-white/20"
+            >
+              <Layers size={14} className="text-indigo-300" />
+              <span>Unified Pathways</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectNav('simulation')}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white transition-all flex items-center gap-1.5 border border-white/20"
+            >
+              <Bot size={14} className="text-teal-300" />
+              <span>Test Simulator</span>
+            </button>
           </div>
         </div>
 
-        {/* Sub-Navigation Tabs */}
-        <div className="mt-6 sm:mt-8 flex items-center gap-1.5 sm:gap-2 flex-wrap border-t border-slate-700/60 pt-3 sm:pt-4 relative z-30 overflow-visible">
-          {menuMode === 'clinical_lab' && (
-            <>
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('harvesting')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'harvesting'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <FileCheck size={14} />
-                <span>Override Rule Harvesting</span>
-              </button>
+        {/* Executive Summary Metrics Cockpit */}
+        <div className="relative z-10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-4">
+          <div 
+            onClick={() => handleSelectNav('harvesting')}
+            className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 cursor-pointer transition-all hover:border-teal-500/50"
+          >
+            <div className="flex items-center justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+              <span>Harvest Proposals</span>
+              <FileCheck size={12} className="text-amber-400" />
+            </div>
+            <div className="text-base sm:text-lg font-black text-white mt-1">
+              {pendingProposalsCount > 0 ? (
+                <span className="text-amber-400">{pendingProposalsCount} Pending</span>
+              ) : (
+                <span className="text-emerald-400">All Reviewed</span>
+              )}
+            </div>
+          </div>
 
-              <div className="relative flex items-center group">
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('jarvis_arh')}
-                  className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                    activeSubTab === 'jarvis_arh'
-                      ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                      : 'text-slate-300 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  <BrainCircuit size={14} />
-                  <span>Jarvis - ARH</span>
-                </button>
-                <div className="ml-1 text-slate-400 hover:text-white cursor-help">
-                  <HelpCircle size={14} />
-                </div>
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-64 p-3 bg-slate-900 border border-slate-700 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-[10px] text-slate-300 pointer-events-none">
-                  <strong className="text-white block mb-1">Agentic Rule Harvester (ARH)</strong>
-                  A pure multi-agentic LLM workflow that dynamically reads inputs (websites, PDFs, CSVs), understands clinical data, and proposes database updates automatically.
-                </div>
-              </div>
+          <div 
+            onClick={() => handleSelectNav('guardrails')}
+            className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 cursor-pointer transition-all hover:border-teal-500/50"
+          >
+            <div className="flex items-center justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+              <span>AI Safety Floor</span>
+              <Shield size={12} className="text-teal-400" />
+            </div>
+            <div className="text-base sm:text-lg font-black text-teal-300 mt-1">
+              {confidenceFloor}% Strict
+            </div>
+          </div>
 
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('rules')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'rules'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Sliders size={14} />
-                <span>Clinical Rule Builder</span>
-                {customRules.length > 0 && (
-                  <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full">
-                    +{customRules.length}
-                  </span>
-                )}
-              </button>
-            </>
-          )}
+          <div 
+            onClick={() => handleSelectNav('rules', 'explorer')}
+            className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 cursor-pointer transition-all hover:border-teal-500/50"
+          >
+            <div className="flex items-center justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+              <span>Active Rules</span>
+              <Database size={12} className="text-indigo-400" />
+            </div>
+            <div className="text-base sm:text-lg font-black text-white mt-1">
+              {totalActiveRulesCount} Rules
+            </div>
+          </div>
 
-          {menuMode === 'app_workspace' && (
-            <>
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('rbac')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'rbac'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Users size={14} />
-                <span>RBAC & Permissions</span>
-              </button>
-            </>
-          )}
+          <div 
+            onClick={() => handleSelectNav('hospitals')}
+            className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 cursor-pointer transition-all hover:border-teal-500/50"
+          >
+            <div className="flex items-center justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+              <span>Hospitals & A&E</span>
+              <Building2 size={12} className="text-sky-400" />
+            </div>
+            <div className="text-base sm:text-lg font-black text-white mt-1">
+              {allFacilities.length} Facilities
+            </div>
+          </div>
 
+          <div 
+            onClick={() => handleSelectNav('insurance')}
+            className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 cursor-pointer transition-all hover:border-teal-500/50"
+          >
+            <div className="flex items-center justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+              <span>Insurance Panels</span>
+              <CreditCard size={12} className="text-purple-400" />
+            </div>
+            <div className="text-base sm:text-lg font-black text-white mt-1">
+              {insuranceCompanies.length} Providers
+            </div>
+          </div>
 
-
-          {menuMode === 'clinical_lab' && (
-            <>
-              {/* Multi-Agent Triage Simulator */}
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('simulation')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'simulation'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Bot size={14} className={activeSubTab === 'simulation' ? 'text-slate-950' : 'text-teal-400'} />
-                <span>Agentic Triage Simulator</span>
-                <span className="bg-indigo-500 text-white text-[8px] font-black px-1 py-0.2 rounded-full uppercase tracking-wider">
-                  Live Trace
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('weather')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'weather'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <CloudSun size={14} />
-                <span>Environment</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('guardrails')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'guardrails'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Shield size={14} className={activeSubTab === 'guardrails' ? 'text-slate-950' : 'text-teal-400'} />
-                <span>Clinical Guardrails</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('triage_medications')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'triage_medications'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Pill size={14} className={activeSubTab === 'triage_medications' ? 'text-slate-950' : 'text-amber-400'} />
-                <span>Triage Decisions & Medications</span>
-              </button>
-            </>
-          )}
-
-          {menuMode === 'app_workspace' && (
-            <>
-              {/* NEW: Key Statistics Screen */}
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('statistics')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'statistics'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <BarChart3 size={14} className={activeSubTab === 'statistics' ? 'text-slate-950' : 'text-teal-400'} />
-                <span>Key Statistics</span>
-              </button>
-
-              {/* NEW: Customer Feedback List */}
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('feedback')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'feedback'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <MessageSquareHeart size={14} className={activeSubTab === 'feedback' ? 'text-slate-950' : 'text-amber-400'} />
-                <span>Customer Feedback</span>
-                {feedbackList.length > 0 && (
-                  <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full">
-                    {feedbackList.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('hospitals')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'hospitals'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Building2 size={14} />
-                <span>Hospital Registry</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('insurance')}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  activeSubTab === 'insurance'
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <CreditCard size={14} />
-                <span>Insurance Registry</span>
-              </button>
-
-              {/* Grouped Integrations & Devices Dropdown Menu (Dark shade without background blurring) */}
-              <div className="relative" ref={integrationsDropdownRef}>
-                <button
-                  type="button"
-                  onClick={() => setIntegrationsDropdownOpen(!integrationsDropdownOpen)}
-                  className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                    ['bluetooth', 'wearables'].includes(activeSubTab)
-                      ? 'bg-teal-500 text-slate-950 shadow-md font-black'
-                      : 'text-slate-300 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  <Cpu size={14} />
-                  <span>Integrations</span>
-                  {['bluetooth', 'wearables'].includes(activeSubTab) && (
-                    <span className="text-[10px] opacity-80 font-normal">
-                      ({activeSubTab === 'bluetooth' ? 'Bluetooth' : 'Wearables'})
-                    </span>
-                  )}
-                  <ChevronDown size={13} className={`transition-transform duration-200 ${integrationsDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-
-                {integrationsDropdownOpen && (
-                  <div className="absolute top-full right-0 mt-1.5 w-56 bg-[#070D14] border border-slate-700/90 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] py-1.5 z-50 animate-fadeIn ring-1 ring-slate-800">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveSubTab('bluetooth');
-                        setIntegrationsDropdownOpen(false);
-                      }}
-                      className={`w-full text-left px-3.5 py-2 text-xs font-medium flex items-center gap-2.5 transition-all ${
-                        activeSubTab === 'bluetooth' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                      }`}
-                    >
-                      <Bluetooth size={14} className="text-teal-400" />
-                      <span>Bluetooth Integrations</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveSubTab('wearables');
-                        setIntegrationsDropdownOpen(false);
-                      }}
-                      className={`w-full text-left px-3.5 py-2 text-xs font-medium flex items-center gap-2.5 transition-all ${
-                        activeSubTab === 'wearables' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                      }`}
-                    >
-                      <Watch size={14} className="text-purple-400" />
-                      <span>Known Wearables</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+          <div 
+            onClick={() => handleSelectNav('feedback')}
+            className="p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 cursor-pointer transition-all hover:border-teal-500/50"
+          >
+            <div className="flex items-center justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+              <span>User Feedback</span>
+              <MessageSquareHeart size={12} className="text-rose-400" />
+            </div>
+            <div className="text-base sm:text-lg font-black text-white mt-1">
+              {feedbackList.length} Reviews
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* TWO-COLUMN COMMAND CENTER LAYOUT */}
+      {/* ========================================================================= */}
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+        {/* LEFT COLUMN: 4-Domain Sticky Navigation Sidebar */}
+        <aside className="w-full lg:w-72 shrink-0 bg-white dark:bg-[#0F1A20] border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm space-y-5 lg:sticky lg:top-24">
+          <div className="flex items-center justify-between px-1 pb-2 border-b border-slate-100 dark:border-slate-800">
+            <span className="text-xs font-black uppercase tracking-wider text-slate-400">
+              Command Menu
+            </span>
+            <span className="text-[10px] font-bold bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 px-2 py-0.5 rounded-full border border-teal-200 dark:border-teal-800">
+              4 Domains
+            </span>
+          </div>
+
+          <div className="space-y-4">
+            {navDomains.map(domain => {
+              const DomainIcon = domain.icon;
+              return (
+                <div key={domain.id} className="space-y-1">
+                  <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    <DomainIcon size={12} className="text-teal-600 dark:text-teal-400" />
+                    <span>{domain.title}</span>
+                  </div>
+
+                  <div className="space-y-0.5">
+                    {domain.items.map(item => {
+                      const ItemIcon = item.icon;
+                      const active = isNavActive(item.id, (item as any).view);
+                      return (
+                        <button
+                          key={`${item.id}-${(item as any).view || ''}`}
+                          type="button"
+                          onClick={() => {
+                            if ((item as any).action) {
+                              (item as any).action();
+                            } else {
+                              handleSelectNav(item.id, (item as any).view);
+                            }
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all text-left ${
+                            active
+                              ? 'bg-teal-500 text-slate-950 font-black shadow-sm'
+                              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70 font-semibold'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <ItemIcon size={14} className={active ? 'text-slate-950 shrink-0' : 'text-slate-400 shrink-0'} />
+                            <span className="truncate">{item.label}</span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                            {(item as any).pill && (
+                              <span className={`text-[9px] font-black px-1.5 py-0.2 rounded-full uppercase ${
+                                active ? 'bg-slate-950/20 text-slate-950' : 'bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300'
+                              }`}>
+                                {(item as any).pill}
+                              </span>
+                            )}
+                            {(item as any).badge && (
+                              <span className={`text-[9px] font-black px-1.5 py-0.2 rounded-full ${
+                                active
+                                  ? 'bg-slate-950 text-teal-300'
+                                  : (item as any).badgeColor || 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                              }`}>
+                                {(item as any).badge}
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+
+        {/* RIGHT COLUMN: Active Workspace Area */}
+        <main className="flex-1 min-w-0 w-full space-y-6">
+          {/* Workspace Context Header Card */}
+          <div className="bg-white dark:bg-[#0F1A20] border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-wider text-teal-600 dark:text-teal-400">
+                {getActiveNavMeta().domain}
+              </div>
+              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2 mt-0.5">
+                <span>{getActiveNavMeta().title}</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {getActiveNavMeta().desc}
+              </p>
+            </div>
+          </div>
 
       {activeSubTab === 'harvesting' && (
         <ClinicalKbConsoleView
@@ -1823,6 +1907,19 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
         allRepositoryRules.forEach(r => ruleMap.set(r.ruleId, r));
         const combinedRules = Array.from(ruleMap.values());
 
+        // Complete list of ailments for rule authoring dropdown
+        const availableAilmentOptions = (() => {
+          const map = new Map<string, string>();
+          (AILMENTS || []).forEach(a => map.set(a.code, a.name));
+          combinedRules.forEach(r => {
+            if (r.ailment && !map.has(r.ailment)) {
+              const readable = r.ailment.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              map.set(r.ailment, readable);
+            }
+          });
+          return Array.from(map.entries()).map(([code, name]) => ({ code, name }));
+        })();
+
         // Counts per severity tier
         const redCount = combinedRules.filter(r => r.severity === 'RED').length;
         const orangeCount = combinedRules.filter(r => r.severity === 'ORANGE').length;
@@ -1848,240 +1945,6 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
 
         return (
           <div className="space-y-6">
-            {/* Header & Metrics Banner */}
-            <div className="bg-white dark:bg-[#14212B] p-6 rounded-3xl border border-[#DDE5E9] dark:border-[#1E2D37] shadow-sm space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300">
-                      Tier 2 Knowledge Agent Repository
-                    </span>
-                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
-                      Spec §4 Hybrid Graph + Vector DB
-                    </span>
-                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1 border border-emerald-300 dark:border-emerald-800">
-                      <Database size={11} className="text-emerald-600 dark:text-emerald-400" />
-                      <span>SQLite DB: data/chat.db (WAL Mode)</span>
-                    </span>
-                  </div>
-                  <h2 className="text-lg font-black text-[#14212B] dark:text-white flex items-center gap-2 mt-1">
-                    <Sliders className="text-[#0F766E] dark:text-[#2DD4BF]" size={22} />
-                    <span>Clinical Rule Builder & Knowledge Repository</span>
-                    <HelperInfoButton
-                      title="Clinical Rule Builder & Knowledge Repository"
-                      content="Models assist, rules decide. This comprehensive clinical rule repository is maintained by @knowledge_agent across all severity tiers (Red, Orange, Yellow, Green) and backed by SQLite WAL storage."
-                    />
-                  </h2>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                    <button
-                      type="button"
-                      onClick={() => setRuleBuilderView('explorer')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                        ruleBuilderView === 'explorer'
-                          ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-400 shadow-sm'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <Database size={13} />
-                      <span>Rule Repository ({combinedRules.length})</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRuleBuilderView('ml_pipeline')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                        ruleBuilderView === 'ml_pipeline'
-                          ? 'bg-gradient-to-r from-teal-500 to-indigo-600 text-white shadow-sm'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <Brain size={13} />
-                      <span>ML Pipeline & Ingestion</span>
-                      <span className="text-[9px] bg-amber-400 text-slate-950 font-black px-1.5 py-0.2 rounded-full uppercase">
-                        AI Harvest
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRuleBuilderView('author')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                        ruleBuilderView === 'author'
-                          ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-400 shadow-sm'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <Plus size={13} />
-                      <span>Manual Studio</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRuleBuilderView('unified')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                        ruleBuilderView === 'unified'
-                          ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-400 shadow-sm'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <Layers size={13} />
-                      <span>Unified Pathways</span>
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowArchFlow(!showArchFlow)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 ${
-                      showArchFlow 
-                        ? 'bg-indigo-50 border-indigo-300 text-indigo-900 dark:bg-indigo-950 dark:border-indigo-800 dark:text-indigo-200' 
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <Layers size={13} className="text-indigo-600 dark:text-indigo-400" />
-                    <span>Pipeline Arch</span>
-                    {showArchFlow ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                  </button>
-                </div>
-              </div>
-
-              {/* KPI Summary Banner */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setRuleSeverityFilter('ALL')}
-                  className={`p-3 rounded-2xl border text-left transition-all ${
-                    ruleSeverityFilter === 'ALL'
-                      ? 'border-slate-900 bg-slate-900 text-white shadow-sm dark:border-white dark:bg-white dark:text-slate-900'
-                      : 'border-slate-200 bg-slate-50 dark:bg-slate-800/40 hover:border-slate-300 text-slate-700 dark:text-slate-300'
-                  }`}
-                >
-                  <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">All Rules</div>
-                  <div className="text-xl font-black mt-0.5">{combinedRules.length}</div>
-                  <div className="text-[9px] opacity-70">Knowledge Base</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRuleSeverityFilter('RED')}
-                  className={`p-3 rounded-2xl border text-left transition-all ${
-                    ruleSeverityFilter === 'RED'
-                      ? 'border-red-600 bg-red-600 text-white shadow-sm'
-                      : 'border-red-200 bg-red-50/60 dark:bg-red-950/30 hover:border-red-300 text-red-900 dark:text-red-300'
-                  }`}
-                >
-                  <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">🔴 RED Tier</div>
-                  <div className="text-xl font-black mt-0.5">{redCount}</div>
-                  <div className="text-[9px] opacity-70">995 Emergency Net</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRuleSeverityFilter('ORANGE')}
-                  className={`p-3 rounded-2xl border text-left transition-all ${
-                    ruleSeverityFilter === 'ORANGE'
-                      ? 'border-amber-600 bg-amber-600 text-white shadow-sm'
-                      : 'border-amber-200 bg-amber-50/60 dark:bg-amber-950/30 hover:border-amber-300 text-amber-900 dark:text-amber-300'
-                  }`}
-                >
-                  <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">🟠 ORANGE Tier</div>
-                  <div className="text-xl font-black mt-0.5">{orangeCount}</div>
-                  <div className="text-[9px] opacity-70">Urgent Care (4-6h)</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRuleSeverityFilter('YELLOW')}
-                  className={`p-3 rounded-2xl border text-left transition-all ${
-                    ruleSeverityFilter === 'YELLOW'
-                      ? 'border-yellow-600 bg-yellow-600 text-white shadow-sm'
-                      : 'border-yellow-200 bg-yellow-50/60 dark:bg-yellow-950/30 hover:border-yellow-300 text-yellow-900 dark:text-yellow-300'
-                  }`}
-                >
-                  <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">🟡 YELLOW Tier</div>
-                  <div className="text-xl font-black mt-0.5">{yellowCount}</div>
-                  <div className="text-[9px] opacity-70">GP / Polyclinic 24h</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRuleSeverityFilter('GREEN')}
-                  className={`p-3 rounded-2xl border text-left transition-all ${
-                    ruleSeverityFilter === 'GREEN'
-                      ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
-                      : 'border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/30 hover:border-emerald-300 text-emerald-900 dark:text-emerald-300'
-                  }`}
-                >
-                  <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">🟢 GREEN Tier</div>
-                  <div className="text-xl font-black mt-0.5">{greenCount}</div>
-                  <div className="text-[9px] opacity-70">Home Monitoring</div>
-                </button>
-
-                <div className="p-3 rounded-2xl border border-indigo-200 bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-950 dark:text-indigo-200">
-                  <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">Hybrid Store</div>
-                  <div className="text-xl font-black mt-0.5">Graph + Vec</div>
-                  <div className="text-[9px] opacity-70">1536d / Neo4j Node</div>
-                </div>
-              </div>
-
-              {/* Multi-Agent Architecture & State Machine (Spec §2, §5) */}
-              {showArchFlow && (
-                <div className="bg-slate-50 dark:bg-[#0F1A20] rounded-2xl p-4 border border-slate-200 dark:border-slate-800 space-y-3 animate-fadeIn">
-                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-                    <span className="text-xs font-black text-slate-800 dark:text-white flex items-center gap-1.5">
-                      <Cpu size={15} className="text-teal-600 dark:text-teal-400" />
-                      <span>Multi-Agent Triage Pipeline & State Machine (Spec §2 & §5)</span>
-                    </span>
-                    <span className="text-[10px] text-teal-700 dark:text-teal-300 font-mono font-bold">
-                      LangGraph State Machine Enforced • Bounded Retry Cap (2x)
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
-                    <div className="bg-white dark:bg-[#14212B] p-3 rounded-xl border border-rose-200 dark:border-rose-900/60 space-y-1">
-                      <div className="flex items-center gap-1.5 font-bold text-rose-700 dark:text-rose-400">
-                        <span className="w-5 h-5 rounded-full bg-rose-100 dark:bg-rose-950 flex items-center justify-center text-[10px] font-black">1</span>
-                        <span>Tier 1: Deterministic Net</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug">
-                        Non-LLM regex/keyword engine. Halts immediately on infant §3.1 & senior §3.2 red-lines. 0ms latency.
-                      </p>
-                    </div>
-
-                    <div className="bg-white dark:bg-[#14212B] p-3 rounded-xl border border-teal-200 dark:border-teal-900/60 space-y-1">
-                      <div className="flex items-center gap-1.5 font-bold text-teal-700 dark:text-teal-400">
-                        <span className="w-5 h-5 rounded-full bg-teal-100 dark:bg-teal-950 flex items-center justify-center text-[10px] font-black">2</span>
-                        <span>Tier 2: @knowledge_agent</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug">
-                        Hybrid Graph + Vector store. Graph edge is explainable rationale. Read-only for agents; Gateway writes only.
-                      </p>
-                    </div>
-
-                    <div className="bg-white dark:bg-[#14212B] p-3 rounded-xl border border-indigo-200 dark:border-indigo-900/60 space-y-1">
-                      <div className="flex items-center gap-1.5 font-bold text-indigo-700 dark:text-indigo-400">
-                        <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-950 flex items-center justify-center text-[10px] font-black">3</span>
-                        <span>Tier 3: Reasoning & Falsifier</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug">
-                        <strong>@triage_agent</strong> drafts assessment; <strong>@expert_doctor_agent</strong> falsifies contraindications (max 2 retries).
-                      </p>
-                    </div>
-
-                    <div className="bg-white dark:bg-[#14212B] p-3 rounded-xl border border-amber-200 dark:border-amber-900/60 space-y-1">
-                      <div className="flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-400">
-                        <span className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950 flex items-center justify-center text-[10px] font-black">4</span>
-                        <span>Tier 4: Governance Gateway</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug">
-                        <strong>@ml_agent</strong> calibrates weights; Human Review Gateway enforces mandatory SMC Doctor cryptographic sign-off.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* 1. Authoring Studio: rendered when ruleBuilderView === 'author' */}
             {ruleBuilderView === 'author' && (
               <div className="bg-white dark:bg-[#14212B] p-6 rounded-3xl border border-[#DDE5E9] dark:border-[#1E2D37] shadow-sm space-y-4 animate-fadeIn">
@@ -2125,7 +1988,7 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                       onChange={e => setNewRuleAilment(e.target.value)}
                       className="w-full bg-[#F6F8FA] dark:bg-[#0F1A20] text-xs font-bold px-3 py-2.5 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] text-[#14212B] dark:text-white"
                     >
-                      {AILMENTS.map(a => (
+                      {availableAilmentOptions.map(a => (
                         <option key={a.code} value={a.code}>{a.name} ({a.code})</option>
                       ))}
                     </select>
@@ -2854,44 +2717,6 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
             {/* 3. Knowledge Repository Explorer: rendered when ruleBuilderView === 'explorer' */}
             {ruleBuilderView === 'explorer' && (
               <div className="space-y-4 animate-fadeIn">
-                {/* Quick Action Strip */}
-                <div className="bg-gradient-to-r from-teal-500/10 via-indigo-500/10 to-teal-500/10 p-4 rounded-2xl border border-teal-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-teal-500/20 text-teal-700 dark:text-teal-300 flex items-center justify-center shrink-0">
-                      <Brain size={18} />
-                    </div>
-                    <div>
-                      <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-2">
-                        <span>Harvest Decision Rules from Clinical Datasets</span>
-                        <span className="text-[9px] bg-teal-500 text-slate-950 font-black px-1.5 py-0.2 rounded-full uppercase">
-                          ML Pipeline
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Invoke the Tier 4 ML induction pipeline on MIMIC-IV or MOH CPG datasets to discover and feed candidate rules into this repository.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setRuleBuilderView('ml_pipeline')}
-                      className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition-all shadow-sm flex items-center gap-1.5 shrink-0"
-                    >
-                      <Brain size={13} />
-                      <span>Launch ML Pipeline</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRuleBuilderView('author')}
-                      className="bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 font-bold text-xs px-3.5 py-2 rounded-xl transition-all shadow-sm flex items-center gap-1.5 shrink-0"
-                    >
-                      <Plus size={13} />
-                      <span>Manual Author</span>
-                    </button>
-                  </div>
-                </div>
-
                 {/* Filter and Search Bar for Knowledge Repository */}
                 <div className="bg-white dark:bg-[#14212B] p-5 rounded-3xl border border-[#DDE5E9] dark:border-[#1E2D37] shadow-sm space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -4898,6 +4723,37 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Embedded Audit & PDPA Privacy View (Workspace stays inside Command Center) */}
+      {activeSubTab === 'pdpa_audit' && (
+        <div className="space-y-4">
+          <AuditAndPdpaView
+            auditLogs={auditLogs || []}
+            household={household}
+            members={members}
+            currentUser={currentUser}
+            exportDataScope={rolePermissions?.[currentUser?.systemRole || 'APP_OWNER']?.capabilities?.export_delete_data || 'full'}
+            totalHouseholdCount={members.length}
+            language={language}
+          />
+        </div>
+      )}
+
+      {/* Embedded Public Hospital Finder Map & GPS */}
+      {activeSubTab === 'public_facilities' && (
+        <div className="space-y-4">
+          <HospitalFinderView
+            userAddressText={primaryAddress?.text || household?.addresses?.[0]?.text || 'Block 123 Toa Payoh Lorong 1, #08-456, Singapore 310123'}
+            defaultPostal={primaryAddress?.postalCode || household?.addresses?.[0]?.postalCode || '310123'}
+            defaultLat={primaryAddress?.lat || 1.3343}
+            defaultLng={primaryAddress?.lng || 103.8509}
+            language={language}
+            facilities={allFacilities}
+          />
+        </div>
+      )}
+        </main>
+      </div>
     </div>
   );
 };
