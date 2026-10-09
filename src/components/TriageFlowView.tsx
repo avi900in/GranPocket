@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, Camera, Mic, Send, AlertOctagon, CheckCircle2, ArrowRight, Loader2, Sparkles, Thermometer, Wind, Eye, Brain, Zap, Bandage } from 'lucide-react';
+import { Activity, Camera, Mic, Send, AlertOctagon, CheckCircle2, ArrowRight, Loader2, Sparkles, Thermometer, Wind, Eye, Brain, Zap, Bandage, HelpCircle, ChevronRight, XCircle } from 'lucide-react';
 import type { Person, Language, TriageResult, Ailment, QuestionStep } from '../types';
 import { getQuestionTree, runTriage } from '../engine/triageEngine';
 import { runRuleBasedTriage, getQuestionTree as getRuleBasedQuestionTree } from '../engine/ruleBasedEngine';
 import { RealVoiceRecorder } from './RealVoiceRecorder';
 import { RealPhotoUploader } from './RealPhotoUploader';
 import { fetchTriageDecisionFromDb } from '../services/dbService';
+import { searchAilmentsVector } from '../engine/vectorSearch';
 
 interface TriageFlowViewProps {
   person: Person;
@@ -18,6 +19,15 @@ interface TriageFlowViewProps {
   triageMode?: 'rule-based' | 'agentic';
 }
 
+export interface VectorCandidateOption {
+  code: string;
+  name: string;
+  description?: string;
+  similarity: number;
+  confidence: number;
+  ailmentObj: Ailment;
+}
+
 export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
   person,
   language,
@@ -28,7 +38,7 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
   onRemoveAilment,
   triageMode = 'rule-based',
 }) => {
-  const [step, setStep] = useState<'intake' | 'questions' | 'processing'>('intake');
+  const [step, setStep] = useState<'intake' | 'vector_confirm' | 'questions' | 'processing'>('intake');
   const [intakeMode, setIntakeMode] = useState<'chips' | 'text' | 'voice' | 'photo'>('chips');
   
   // State for different modalities
@@ -40,6 +50,10 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
   const [isLoadingAilments, setIsLoadingAilments] = useState(true);
   const [selectedAilment, setSelectedAilment] = useState<Ailment | null>(null);
   
+  // Vector search candidates for user confirmation
+  const [vectorCandidates, setVectorCandidates] = useState<VectorCandidateOption[]>([]);
+  const [pendingCustomQuestions, setPendingCustomQuestions] = useState<QuestionStep[] | undefined>(undefined);
+
   const [questions, setQuestions] = useState<QuestionStep[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, any>>({});
@@ -106,7 +120,22 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
 
   const [visionMetaState, setVisionMetaState] = useState<any>(null);
 
-  // NLP matcher to guess ailment from text/voice
+  // General fallback ailment representation
+  const getFallbackGeneralAilment = (): Ailment => {
+    const existing = ailments.find(a => a.code === 'general');
+    if (existing) return existing;
+    return {
+      code: 'general',
+      name: 'General Symptoms',
+      nameZh: '常见/未分类症状',
+      nameMs: 'Gejala Umum',
+      icon: 'HelpCircle',
+      description: 'General or unlisted health issue — general review triage',
+      redFlagThemes: ['Persistent discomfort', 'unclear etiology', 'general weakness']
+    };
+  };
+
+  // Legacy fallback matcher for direct lookup when needed
   const detectAilmentFromText = (text: string): Ailment => {
     const lower = text.toLowerCase();
     
@@ -130,15 +159,119 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
       if (lower.includes(a.name.toLowerCase())) return a;
     }
     if (lower.includes('cut') || lower.includes('bleed') || lower.includes('fall') || lower.includes('wound')) {
-      return ailments.find(a => a.code === 'injury_wound') || ailments[0];
+      return ailments.find(a => a.code === 'injury_wound') || ailments[0] || getFallbackGeneralAilment();
     }
     if (lower.includes('rash') || lower.includes('skin') || lower.includes('itch')) {
-      return ailments.find(a => a.code === 'skin_rash') || ailments[0];
+      return ailments.find(a => a.code === 'skin_rash') || ailments.find(a => a.code === 'rash') || ailments[0] || getFallbackGeneralAilment();
     }
     if (lower.includes('fever') || lower.includes('temp') || lower.includes('hot')) {
-      return ailments.find(a => a.code === 'fever') || ailments[0];
+      return ailments.find(a => a.code === 'fever') || ailments[0] || getFallbackGeneralAilment();
     }
-    return ailments.find(a => a.code === 'eye_symptoms') || ailments[0]; // fallback
+    return getFallbackGeneralAilment();
+  };
+
+  /**
+   * Direct Search in Ailments Table:
+   * Checks if query matches any ailment code or name directly.
+   */
+  const findDirectAilmentMatch = (queryText: string): Ailment | null => {
+    const clean = queryText.trim().toLowerCase();
+    if (!clean) return null;
+
+    // 1. Exact match on code, code without underscores, or names
+    const exact = ailments.find(a => 
+      a.code.toLowerCase() === clean ||
+      a.code.toLowerCase().replace(/_/g, ' ') === clean ||
+      a.name.toLowerCase() === clean ||
+      (a.nameZh && a.nameZh.toLowerCase() === clean) ||
+      (a.nameMs && a.nameMs.toLowerCase() === clean)
+    );
+    if (exact) return exact;
+
+    // 2. Word-boundary or substring check if input contains canonical ailment names or codes
+    // E.g. user types "cough", "I have a cough", "severe fever"
+    for (const a of ailments) {
+      const codeWord = a.code.replace(/_/g, ' ').toLowerCase();
+      const nameWord = a.name.toLowerCase();
+      // Match whole word or exact inclusion
+      const regexCode = new RegExp(`\\b${codeWord}\\b`, 'i');
+      const regexName = new RegExp(`\\b${nameWord}\\b`, 'i');
+      if (regexCode.test(clean) || regexName.test(clean)) {
+        return a;
+      }
+    }
+
+    return null;
+  };
+
+  /**
+   * Process intake query:
+   * 1. Direct Search: If an exact or direct match is found in ailments table, proceed immediately to assessment!
+   * 2. Vector Search: If direct search does not work, run vector cosine similarity search and present top 2-3 candidates.
+   * 3. Fallback: If vector search has no matches, fall back to general category.
+   */
+  const handleIntakeWithVectorSearch = (queryText: string, customQuestions?: QuestionStep[]) => {
+    const clean = queryText.trim();
+    if (!clean) return;
+
+    setPendingCustomQuestions(customQuestions);
+
+    // Step 1: Direct Search in Ailments Table
+    const directMatch = findDirectAilmentMatch(clean);
+    if (directMatch) {
+      console.log(`[Triage Flow] Direct search matched: "${clean}" -> "${directMatch.name}" (${directMatch.code}). Proceeding immediately.`);
+      startAssessment(directMatch, customQuestions);
+      return;
+    }
+
+    // Step 2: Vector Search (Only if direct search does not work)
+    const vectorMatches = searchAilmentsVector(clean, 3);
+    // Filter candidates with positive cosine similarity (above baseline 0.12)
+    const validMatches = vectorMatches.filter(m => m.similarity >= 0.12);
+
+    if (validMatches.length > 0) {
+      // Map candidates to full Ailment objects
+      const candidates: VectorCandidateOption[] = validMatches.map(m => {
+        const found = ailments.find(a => a.code === m.code) || {
+          code: m.code,
+          name: m.name,
+          description: `Clinically mapped condition for "${m.name}"`,
+          icon: 'Activity',
+          redFlagThemes: ['Clinical monitoring advised']
+        };
+        return {
+          code: m.code,
+          name: found.name || m.name,
+          description: found.description,
+          similarity: m.similarity,
+          confidence: m.confidence,
+          ailmentObj: found
+        };
+      });
+
+      setVectorCandidates(candidates);
+      setStep('vector_confirm');
+    } else {
+      // Step 3: No vector matches found -> directly fall back to general category
+      handleFallbackToGeneral(customQuestions);
+    }
+  };
+
+  /**
+   * User confirms one of the top vector search options
+   */
+  const handleConfirmVectorAilment = (candidate: VectorCandidateOption) => {
+    setVectorCandidates([]);
+    startAssessment(candidate.ailmentObj, pendingCustomQuestions);
+  };
+
+  /**
+   * User chooses "None of these" -> falls back to no ailment found / general category
+   */
+  const handleFallbackToGeneral = (customQuestions?: QuestionStep[]) => {
+    setVectorCandidates([]);
+    const fallbackAilment = getFallbackGeneralAilment();
+    startAssessment(fallbackAilment, customQuestions || pendingCustomQuestions);
   };
 
   // AbortController for cancelling triage
@@ -297,6 +430,13 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
       analyzeText: "Analyze Text",
       assessVoice: "Assess Voice Transcript",
       assessImage: "Assess Image Cues",
+      vectorConfirmTitle: "Confirm Matching Condition",
+      vectorConfirmSubtitle: "Based on our semantic vector search (cosine similarity), we found top matching clinical conditions for your symptoms. Please confirm the best match:",
+      cosineSimilarityMatch: "Match",
+      confirmChoice: "Select & Continue",
+      noneOfThese: "None of these / Other symptoms",
+      noneOfTheseDesc: "None of these match my condition. Proceed with general symptom review.",
+      backToIntake: "Change Description",
     },
     ms: {
       analyzing: "Menganalisis Gejala",
@@ -324,6 +464,13 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
       analyzeText: "Analisis Teks",
       assessVoice: "Nilai Transkrip Suara",
       assessImage: "Nilai Petunjuk Imej",
+      vectorConfirmTitle: "Sahkan Keadaan Yang Sepadan",
+      vectorConfirmSubtitle: "Berdasarkan carian vektor semantik (persamaan kosinus), kami menemui padanan klinikal teratas. Sila sahkan padanan terbaik:",
+      cosineSimilarityMatch: "Padanan",
+      confirmChoice: "Pilih & Teruskan",
+      noneOfThese: "Tiada satu pun / Gejala lain",
+      noneOfTheseDesc: "Tiada yang sepadan dengan keadaan saya. Teruskan dengan penilaian gejala umum.",
+      backToIntake: "Tukar Penerangan",
     },
     zh: {
       analyzing: "正在分析症状",
@@ -351,6 +498,13 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
       analyzeText: "分析文本",
       assessVoice: "评估语音记录",
       assessImage: "评估图像线索",
+      vectorConfirmTitle: "确认匹配病症",
+      vectorConfirmSubtitle: "根据语义向量检索（余弦相似度），我们为您找到了前2-3个最匹配的临床病症，请确认最相符的选项：",
+      cosineSimilarityMatch: "匹配度",
+      confirmChoice: "选择并继续",
+      noneOfThese: "以上都不是 / 其他症状",
+      noneOfTheseDesc: "以上选项均不符合。进入常见未分类症状通用问诊流程。",
+      backToIntake: "修改描述",
     }
   }[language];
 
@@ -388,6 +542,96 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
         >
           Stop Analysis
         </button>
+      </div>
+    );
+  }
+
+  // VECTOR SEARCH CONFIRMATION STEP (Top 2-3 Cosine Similarity Candidates)
+  if (step === 'vector_confirm') {
+    return (
+      <div className="bg-white/85 backdrop-blur-xl p-8 rounded-3xl shadow-sm border border-white/60 max-w-2xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4">
+        <div className="flex items-center justify-between border-b border-gray-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+              <Sparkles size={20} />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900">{t.vectorConfirmTitle}</h3>
+              <p className="text-xs text-indigo-600 font-semibold uppercase tracking-wider">Vector Search • Cosine Similarity</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setStep('intake')}
+            className="text-xs font-semibold text-gray-500 hover:text-gray-800 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            {t.backToIntake}
+          </button>
+        </div>
+
+        <p className="text-sm text-gray-600 leading-relaxed">
+          {t.vectorConfirmSubtitle}
+        </p>
+
+        {/* Top 2-3 Vector Candidates */}
+        <div className="space-y-3">
+          {vectorCandidates.map((candidate, idx) => (
+            <button
+              key={candidate.code}
+              onClick={() => handleConfirmVectorAilment(candidate)}
+              className="w-full text-left p-4 rounded-2xl border-2 border-indigo-100/80 bg-gradient-to-r from-white to-indigo-50/30 hover:border-indigo-500 hover:bg-indigo-50/60 hover:shadow-md transition-all group flex items-start justify-between gap-4"
+            >
+              <div className="flex items-start gap-3.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100/70 text-indigo-700 flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                  {idx + 1}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-gray-900 text-base group-hover:text-indigo-950 transition-colors">
+                      {candidate.name}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">
+                      <Sparkles size={11} />
+                      {candidate.confidence}% {t.cosineSimilarityMatch}
+                    </span>
+                  </div>
+                  {candidate.description && (
+                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                      {candidate.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="shrink-0 flex items-center text-indigo-400 group-hover:text-indigo-600 transition-colors mt-2">
+                <ChevronRight size={20} />
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* None of these / General Fallback Option */}
+        <div className="pt-2 border-t border-gray-100">
+          <button
+            onClick={() => handleFallbackToGeneral()}
+            className="w-full text-left p-4 rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50/60 hover:border-gray-400 hover:bg-gray-100/80 transition-all flex items-start justify-between gap-4 group"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-9 h-9 rounded-xl bg-gray-200/80 text-gray-600 flex items-center justify-center shrink-0 mt-0.5 group-hover:bg-gray-300 transition-colors">
+                <HelpCircle size={18} />
+              </div>
+              <div>
+                <span className="font-bold text-gray-800 text-sm block">
+                  {t.noneOfThese}
+                </span>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {t.noneOfTheseDesc}
+                </p>
+              </div>
+            </div>
+            <div className="shrink-0 flex items-center text-gray-400 group-hover:text-gray-600 transition-colors mt-2">
+              <ArrowRight size={18} />
+            </div>
+          </button>
+        </div>
       </div>
     );
   }
@@ -552,7 +796,7 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
             <div className="flex justify-end">
               <button 
                 disabled={!textInput.trim()}
-                onClick={() => startAssessment(detectAilmentFromText(textInput))}
+                onClick={() => handleIntakeWithVectorSearch(textInput)}
                 className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-md transition-all flex items-center gap-2"
               >
                 <span>{t.analyzeText}</span>
@@ -571,7 +815,7 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
             {textInput && (
               <div className="flex justify-end mt-4">
                 <button 
-                  onClick={() => startAssessment(detectAilmentFromText(textInput))}
+                  onClick={() => handleIntakeWithVectorSearch(textInput)}
                   className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center gap-2"
                 >
                   <span>{t.assessVoice}</span>

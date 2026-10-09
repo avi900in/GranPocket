@@ -29,6 +29,12 @@ import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import { promisify } from "util";
 import * as db from "./db.js";
+import {
+  searchAilmentsVector,
+  resolveAilmentVector,
+  searchRulesVector,
+  getVectorSearchStats
+} from "../src/engine/vectorSearch.ts";
 
 const execAsync = promisify(exec);
 
@@ -1116,6 +1122,49 @@ app.post("/api/agentic/ml-calibrate", async (req, res) => {
   }
 });
 
+// ============= Vector Search API (SRS §4.4, §7.3) =============
+app.get("/api/vector/stats", (req, res) => {
+  try {
+    const stats = getVectorSearchStats();
+    res.json({ success: true, stats });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/vector/search", (req, res) => {
+  try {
+    const { query, type = 'all', topK = 5 } = req.body;
+    if (!query) {
+      return res.status(400).json({ success: false, error: 'Query string is required' });
+    }
+
+    const result: any = { query };
+
+    if (type === 'ailment' || type === 'all') {
+      result.ailments = searchAilmentsVector(query, topK);
+      result.resolvedAilment = resolveAilmentVector(query);
+    }
+
+    if (type === 'rules' || type === 'all') {
+      const allRules = db.getAllRules();
+      result.rules = searchRulesVector(query, allRules, topK, 0.12).map(r => ({
+        ruleId: r.rule.ruleId,
+        conditionId: r.rule.conditionId,
+        similarity: r.similarity,
+        confidence: Math.round(Math.max(0, (r.similarity + 1) / 2) * 100),
+        severity: r.rule.severity,
+        bodyPart: r.rule.bodyPart,
+        rationale: r.rule.rationale
+      }));
+    }
+
+    res.json({ success: true, result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // =========================================================================
 // SQLite Database CRUD APIs (Persistent Storage for all TypeScript data)
 // =========================================================================
@@ -1573,6 +1622,44 @@ app.get('/db-browser', (req, res) => {
 });
 
 // API endpoints
+app.get('/api/db-browser/schema', (req, res) => {
+  try {
+    const dbInstance = db.default;
+    const tables = dbInstance.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as any[];
+    
+    let totalRows = 0;
+    const tableSchemas = tables.map(t => {
+      const columns = dbInstance.prepare(`PRAGMA table_info("${t.name}")`).all() as any[];
+      let rowCount = 0;
+      try {
+        const countRow = dbInstance.prepare(`SELECT count(*) as c FROM "${t.name}"`).get() as any;
+        rowCount = countRow ? countRow.c : 0;
+      } catch (e) {}
+      totalRows += rowCount;
+      return {
+        name: t.name,
+        rowCount,
+        columns
+      };
+    });
+
+    const dbVerRow = dbInstance.prepare("SELECT sqlite_version() as ver").get() as any;
+    const journalModeRow = dbInstance.prepare("PRAGMA journal_mode").get() as any;
+
+    res.json({
+      success: true,
+      databasePath: "data/chat.db",
+      sqliteVersion: dbVerRow?.ver || "3.53",
+      journalMode: (journalModeRow?.journal_mode || "wal").toUpperCase(),
+      tableCount: tables.length,
+      totalRows,
+      tables: tableSchemas
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/db-browser/tables', (req, res) => {
   try {
     const dbInstance = db.default;
@@ -1587,27 +1674,140 @@ app.get('/api/db-browser/tables/:tableName', (req, res) => {
   try {
     const tableName = req.params.tableName;
     if (!/^[a-zA-Z0-9_]+$/.test(tableName)) {
-      return res.status(400).json({error: 'Invalid table name'});
+      return res.status(400).json({ error: 'Invalid table name' });
     }
     const dbInstance = db.default;
-    const rows = dbInstance.prepare(`SELECT * FROM ${tableName} LIMIT 500`).all();
-    res.json({ rows });
+
+    const tableExists = dbInstance.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(tableName);
+    if (!tableExists) {
+      return res.status(404).json({ error: `Table '${tableName}' not found` });
+    }
+
+    const columns = dbInstance.prepare(`PRAGMA table_info("${tableName}")`).all() as any[];
+    const colNames = columns.map(c => c.name);
+
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(5, parseInt(req.query.limit as string) || 25));
+    const offset = (page - 1) * limit;
+    const search = ((req.query.search as string) || '').trim();
+    const sortBy = (req.query.sortBy as string) || '';
+    const sortOrder = ((req.query.sortOrder as string) || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+
+    let countSql = `SELECT count(*) as total FROM "${tableName}"`;
+    let selectSql = `SELECT * FROM "${tableName}"`;
+    const params: any[] = [];
+
+    if (search && colNames.length > 0) {
+      const searchClauses = colNames.map(col => `CAST("${col}" AS TEXT) LIKE ?`);
+      const whereSql = ` WHERE (${searchClauses.join(' OR ')})`;
+      countSql += whereSql;
+      selectSql += whereSql;
+      for (let i = 0; i < colNames.length; i++) {
+        params.push(`%${search}%`);
+      }
+    }
+
+    if (sortBy && colNames.includes(sortBy)) {
+      selectSql += ` ORDER BY "${sortBy}" ${sortOrder}`;
+    }
+
+    selectSql += ` LIMIT ? OFFSET ?`;
+    const queryParams = [...params, limit, offset];
+
+    const totalCountRow = dbInstance.prepare(countSql).get(...params) as any;
+    const totalRows = totalCountRow ? totalCountRow.total : 0;
+    const rows = dbInstance.prepare(selectSql).all(...queryParams);
+
+    res.json({
+      success: true,
+      tableName,
+      columns,
+      rows,
+      page,
+      limit,
+      totalRows,
+      totalPages: Math.ceil(totalRows / limit) || 1
+    });
   } catch(e: any) {
-    res.status(500).json({error: e.message});
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/db-browser/query', (req, res) => {
+  try {
+    const { sql } = req.body;
+    if (!sql || typeof sql !== 'string' || !sql.trim()) {
+      return res.status(400).json({ error: "SQL query string is required." });
+    }
+
+    const trimmed = sql.trim().replace(/;+$/, '');
+    const normalized = trimmed.toLowerCase();
+
+    // Safety guardrails: strictly read-only
+    const forbidden = [
+      'insert', 'update', 'delete', 'drop', 'alter', 'create', 'replace',
+      'attach', 'detach', 'vacuum', 'transaction', 'commit', 'rollback',
+      'reindex', 'truncate'
+    ];
+    for (const kw of forbidden) {
+      const regex = new RegExp(`\\b${kw}\\b`, 'i');
+      if (regex.test(normalized)) {
+        return res.status(403).json({
+          error: `Safety Guardrail Hard-Stop: Mutating statement '${kw.toUpperCase()}' is blocked in read-only Database Browser.`
+        });
+      }
+    }
+
+    if (!normalized.startsWith('select') && !normalized.startsWith('pragma') && !normalized.startsWith('explain')) {
+      return res.status(400).json({
+        error: "Only read-only queries (SELECT, PRAGMA, EXPLAIN) are permitted."
+      });
+    }
+
+    let finalSql = trimmed;
+    if (!normalized.includes('limit')) {
+      finalSql += ' LIMIT 300';
+    }
+
+    const startTime = Date.now();
+    const dbInstance = db.default;
+    const rows = dbInstance.prepare(finalSql).all() as any[];
+    const durationMs = Date.now() - startTime;
+    const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+
+    res.json({
+      success: true,
+      columns,
+      rows,
+      rowCount: rows.length,
+      durationMs,
+      executedSql: finalSql
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
   }
 });
 
 app.get('/api/db-browser/export/:tableName', (req, res) => {
   try {
     const tableName = req.params.tableName;
+    const format = ((req.query.format as string) || 'csv').toLowerCase();
     if (!/^[a-zA-Z0-9_]+$/.test(tableName)) {
       return res.status(400).json({error: 'Invalid table name'});
     }
     const dbInstance = db.default;
-    const rows = dbInstance.prepare(`SELECT * FROM ${tableName}`).all() as any[];
+    const rows = dbInstance.prepare(`SELECT * FROM "${tableName}"`).all() as any[];
     
+    if (format === 'json') {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename=${tableName}.json`);
+      return res.send(JSON.stringify(rows, null, 2));
+    }
+
     if (rows.length === 0) {
-      return res.send('No data in table');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=${tableName}.csv`);
+      return res.send('');
     }
     
     // Convert to CSV
@@ -1619,7 +1819,6 @@ app.get('/api/db-browser/export/:tableName', (req, res) => {
         let val = row[col];
         if (val === null || val === undefined) val = '';
         if (typeof val === 'object') val = JSON.stringify(val);
-        // Escape quotes and wrap in quotes
         val = String(val).replace(/"/g, '""');
         return `"${val}"`;
       }).join(',') + '\n';

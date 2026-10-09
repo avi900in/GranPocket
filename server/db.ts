@@ -3,8 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 
-import { AGENTIC_KNOWLEDGE_REPOSITORY } from '../src/engine/triageEngine.ts';
-import { AILMENTS, EMERGENCY_KEYWORDS } from '../src/engine/triageEngine_old.ts';
+import { AGENTIC_KNOWLEDGE_REPOSITORY, AILMENTS, EMERGENCY_KEYWORDS } from '../src/engine/triageEngine.ts';
 import {
   ALL_HOUSEHOLDS,
   INITIAL_MEMBERS,

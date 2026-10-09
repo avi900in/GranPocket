@@ -1233,6 +1233,16 @@ export default function App() {
       localStorage.setItem('granpocket_active_household_id', newHouseholdId);
     } catch {}
 
+    const consentAudit: AuditEvent = {
+      id: `audit-pdpa-consent-${Date.now()}`,
+      actor: caregiverPerson.name,
+      action: 'PDPA_CONSENT_ACKNOWLEDGED',
+      resource: `${newHousehold.name} (Mandatory Consent)`,
+      timestamp: new Date().toISOString(),
+      version: '1.0.0-provisional',
+      details: 'User explicitly agreed to Singapore PDPA 2012 personal & health data collection, healthcare services delivery, and medical intermediaries sharing upon household signup.',
+    };
+
     const newAudit: AuditEvent = {
       id: `audit-hh-${Date.now()}`,
       actor: caregiverPerson.name,
@@ -1242,7 +1252,7 @@ export default function App() {
       version: '1.0.0-provisional',
       details: `Caregiver: ${caregiverPerson.name} • Seed data: ${data.seedSampleData ? 'Yes' : 'No'}`,
     };
-    setAuditLogs(prev => [newAudit, ...prev]);
+    setAuditLogs(prev => [consentAudit, newAudit, ...prev]);
   };
 
   // Switch Active Household

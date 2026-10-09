@@ -120,6 +120,24 @@ export function runDeterministicSafetyNet(
     }
   }
 
+  // Pediatric Medication Contraindication Hard-Stop (Aspirin in Children & Teens < 16 / Reye's Syndrome)
+  if (age < 16) {
+    const requestedMed = (answers && answers.requested_med ? String(answers.requested_med).toLowerCase() : '');
+    if (
+      content.includes('aspirin') || 
+      content.includes('salicyl') || 
+      content.includes('disprin') || 
+      requestedMed.includes('aspirin') || 
+      requestedMed.includes('salicyl')
+    ) {
+      return {
+        tripped: true,
+        reason: "Clinical Hard-Stop: Aspirin is strictly contraindicated in children under 16 with viral illness/fever due to life-threatening Reye's Syndrome risk.",
+        ruleId: 'REDLINE-PEDIATRIC-ASPIRIN'
+      };
+    }
+  }
+
   // Senior Red-Line (> 65 years)
   if (age >= 65) {
     if (content.includes('chest pain') || content.includes('pressure in chest') || content.includes('squeezing')) {

@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as db from './db.js';
 import type { Person, Severity, TriageRule, HomeMedicationSuggestion } from '../src/types.ts';
 import { runDeterministicSafetyNet } from '../src/engine/agenticPipeline.ts';
+import { searchRulesVector } from '../src/engine/vectorSearch.ts';
 
 export interface DynamicAgenticInput {
   text?: string;
@@ -909,12 +910,25 @@ export async function executeDynamicKnowledgeAgent(
   const isFreeTextHeavy = Boolean(rawText && rawText.length > 25);
   const queryShape: 'graph' | 'vector' | 'hybrid' = isFreeTextHeavy ? 'hybrid' : 'graph';
 
-  // Filter against active SQLite rules
-  let matchedRules = allDbRules.filter(r => {
-    // Age check
+  // 1. Run Real Dense Vector Similarity Search across SQLite CPG Rules
+  const vectorQuery = [rawText, ...(symptoms || [])].filter(Boolean).join(' ');
+  const vectorResults = vectorQuery ? searchRulesVector(vectorQuery, allDbRules, 6, 0.16) : [];
+  const vectorScoreMap = new Map<string, number>();
+  for (const vr of vectorResults) {
+    vectorScoreMap.set(vr.rule.ruleId, vr.similarity);
+  }
+
+  // 2. Age applicability helper
+  const isAgeApplicable = (r: TriageRule) => {
     if (ageBand && ageBand !== 'all' && r.ageBand && r.ageBand !== 'all' && r.ageBand !== ageBand) {
       return false;
     }
+    return true;
+  };
+
+  // 3. Graph and Exact Condition Matches
+  let matchedRules = allDbRules.filter(r => {
+    if (!isAgeApplicable(r)) return false;
     // Body part check
     if (bodyPart && r.bodyPart && !r.bodyPart.toLowerCase().includes(bodyPart.toLowerCase())) {
       return false;
@@ -931,56 +945,35 @@ export async function executeDynamicKnowledgeAgent(
       );
       if (hasMatch) return true;
     }
-    // Direct anatomical / chief complaint semantic matching against free-text
-    const lowerRaw = (rawText || '').toLowerCase();
-    if (lowerRaw) {
-      if (lowerRaw.includes('foot') || lowerRaw.includes('ankle') || lowerRaw.includes('sprain') || lowerRaw.includes('twist') || lowerRaw.includes('limp')) {
-        if (r.ruleId.includes('FOOT') || r.ruleId.includes('FRACTURE') || r.bodyPart?.toLowerCase().includes('musculoskeletal') || r.bodyPart?.toLowerCase().includes('extremity')) {
-          return true;
-        }
-      }
-      if (lowerRaw.includes('fracture') || lowerRaw.includes('broken') || lowerRaw.includes('bone') || lowerRaw.includes('deform')) {
-        if (r.ruleId.includes('FRACTURE') || r.conditionId?.toLowerCase().includes('fracture')) {
-          return true;
-        }
-      }
-      if (lowerRaw.includes('injury') || lowerRaw.includes('wound') || lowerRaw.includes('trauma')) {
-        if (r.ailment === 'injury_wound' || r.bodyPart?.toLowerCase().includes('trauma') || r.bodyPart?.toLowerCase().includes('musculoskeletal')) {
-          return true;
-        }
-      }
-      if (lowerRaw.includes('breath') || lowerRaw.includes('choke') || lowerRaw.includes('chest')) {
-        if (r.ailment === 'breathing_difficulty' || r.ailment === 'chest_pain' || r.bodyPart?.toLowerCase().includes('respir') || r.bodyPart?.toLowerCase().includes('cardio')) {
-          return true;
-        }
-      }
-      if (lowerRaw.includes('throat') || lowerRaw.includes('pharyng') || lowerRaw.includes('tonsil') || lowerRaw.includes('swallow')) {
-        if (r.ruleId.includes('THROAT') || r.conditionId?.toLowerCase().includes('pharyng') || r.bodyPart?.toLowerCase().includes('throat') || r.bodyPart?.toLowerCase().includes('ent')) {
-          return true;
-        }
-      }
-    }
     return false;
   });
 
-  console.log(`[Agentic Triage] @knowledge_agent -> Query Shape: ${queryShape}, Retrieved ${matchedRules.length} CPG rules from SQLite`);
-
-  if (matchedRules.length === 0) {
-    const lowerRaw = (rawText || '').toLowerCase();
-    // Clinical Domain Isolation: For extremity/musculoskeletal complaints, isolate to injury rules
-    if (lowerRaw.includes('foot') || lowerRaw.includes('ankle') || lowerRaw.includes('knee') || lowerRaw.includes('leg') || lowerRaw.includes('sprain') || lowerRaw.includes('injury') || lowerRaw.includes('trauma') || lowerRaw.includes('fracture') || lowerRaw.includes('wound')) {
-      const injuryRules = allDbRules.filter(r => r.ailment === 'injury_wound' || r.bodyPart?.toLowerCase().includes('musculoskeletal') || r.bodyPart?.toLowerCase().includes('extremity'));
-      matchedRules = injuryRules.length > 0 ? injuryRules.slice(0, 3) : [];
-    } else if (lowerRaw.includes('throat') || lowerRaw.includes('pharyng') || lowerRaw.includes('tonsil') || lowerRaw.includes('swallow')) {
-      const throatRules = allDbRules.filter(r => r.ruleId.includes('THROAT') || r.bodyPart?.toLowerCase().includes('throat') || r.bodyPart?.toLowerCase().includes('ent'));
-      matchedRules = throatRules.length > 0 ? throatRules.slice(0, 3) : [];
+  // 4. Merge Vector Similarity Matches into Matched Rules
+  for (const vr of vectorResults) {
+    if (isAgeApplicable(vr.rule)) {
+      if (!matchedRules.some(r => r.ruleId === vr.rule.ruleId)) {
+        matchedRules.push(vr.rule);
+      }
     }
-    // Zero match: do not force arbitrary respiratory/cold rules. Keep matchedRules as empty array.
   }
 
+  // Sort matched rules prioritizing highest vector similarity
+  matchedRules.sort((a, b) => {
+    const simA = vectorScoreMap.get(a.ruleId) || 0;
+    const simB = vectorScoreMap.get(b.ruleId) || 0;
+    return simB - simA;
+  });
+
+  console.log(`[Agentic Triage] @knowledge_agent -> Query Shape: ${queryShape}, Vector matches: ${vectorResults.length}, Total retrieved: ${matchedRules.length} CPG rules from SQLite`);
+
   const traversalPath = matchedRules.length > 0
-    ? matchedRules.map(r => `${r.bodyPart || 'General'} -> ${r.conditionId || r.ruleId} -> [Tier ${r.severity}]`)
+    ? matchedRules.map(r => {
+        const score = vectorScoreMap.get(r.ruleId);
+        const scoreText = score ? ` [Cosine Sim: ${(score * 100).toFixed(1)}%]` : '';
+        return `${r.bodyPart || 'General'} -> ${r.conditionId || r.ruleId} -> [Tier ${r.severity}]${scoreText}`;
+      })
     : ['Zero-match in knowledge base -> Escalation to clinician consultation'];
+
 
   const sourceRefs = matchedRules.length > 0
     ? Array.from(new Set(matchedRules.flatMap(r => r.sourceRefs || ['MOH Singapore Clinical Practice Guidelines (2026)'])))

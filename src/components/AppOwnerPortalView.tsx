@@ -82,6 +82,8 @@ import { AgenticKnowledgeHarvester } from './AgenticKnowledgeHarvester';
 import { HelperInfoButton } from './HelperInfoButton';
 import { AuditAndPdpaView } from './AuditAndPdpaView';
 import { HospitalFinderView } from './HospitalFinderView';
+import { DatabaseBrowserView } from './DatabaseBrowserView';
+import { TriageEngineHealthCheckView } from './TriageEngineHealthCheckView';
 import {
   fetchCustomerFeedback,
   fetchKeyStatistics,
@@ -137,7 +139,9 @@ type SubTab =
   | 'wearables'
   | 'jarvis_arh'
   | 'pdpa_audit'
-  | 'public_facilities';
+  | 'public_facilities'
+  | 'db_browser'
+  | 'engine_health_check';
 
 export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
   currentUser,
@@ -1309,6 +1313,7 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
     if (activeSubTab === 'triage_medications') return { domain: 'Domain 2: Decisions, Safety & AI Lab', title: 'Deterministic Decisions & Medications Registry', desc: 'Master SQLite table for deterministic triage outcomes, OTC medications, and caregiver dosing schedules.' };
     if (activeSubTab === 'guardrails') return { domain: 'Domain 2: Decisions, Safety & AI Lab', title: 'Clinical Safety Guardrails', desc: 'AI safety boundary governance: confidence floor, allergy hard-stops, and rule staleness limits.' };
     if (activeSubTab === 'simulation') return { domain: 'Domain 2: Decisions, Safety & AI Lab', title: 'Agentic Triage Simulator', desc: 'Interactive sandbox testing patient complaints against multi-agent pipeline traces in real time.' };
+    if (activeSubTab === 'engine_health_check') return { domain: 'Domain 2: Decisions, Safety & AI Lab', title: 'Triage Engine Automated Health Check & QA Runner', desc: 'Pre-defined test suites running deterministic red flags, primary care deflection, multi-agent traces, and safety guardrails.' };
     if (activeSubTab === 'weather') return { domain: 'Domain 2: Decisions, Safety & AI Lab', title: 'Environmental & Dengue Surveillance', desc: 'Live NEA Singapore weather nowcast, PSI haze indices, and dengue cluster risk overlays.' };
     if (activeSubTab === 'hospitals') return { domain: 'Domain 3: Registries & Hardware', title: 'Singapore Hospital & A&E Registry', desc: 'Administrative registry of hospitals and urgent care clinics with postal code auto-lookup.' };
     if (activeSubTab === 'insurance') return { domain: 'Domain 3: Registries & Hardware', title: 'Insurance & Panel Registry', desc: 'Singapore Integrated Shield Plans, panel clinic directories, and MediSave claim limits.' };
@@ -1317,6 +1322,7 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
     if (activeSubTab === 'rbac') return { domain: 'Domain 4: Platform & Compliance', title: 'RBAC & Permission Matrix', desc: 'System-wide role permissions, screen visibility, and 10 capability access tiers.' };
     if (activeSubTab === 'statistics') return { domain: 'Domain 4: Platform & Compliance', title: 'Key Platform Analytics & KPIs', desc: 'Operational dashboard tracking triage inquiries, 995 emergency dispatches, and engine latency.' };
     if (activeSubTab === 'feedback') return { domain: 'Domain 4: Platform & Compliance', title: 'Customer Feedback Hub', desc: 'Patient and household ratings, reviews, and clinical governance feedback resolution.' };
+    if (activeSubTab === 'db_browser') return { domain: 'Domain 4: Platform & Compliance', title: 'SQLite Database Browser & Live SQL Console', desc: 'Live exploration of data/chat.db tables, schema inspection, pagination, and safe read-only SQL querying.' };
     if (activeSubTab === 'pdpa_audit') return { domain: 'Domain 4: Platform & Compliance', title: 'Cryptographic Audit Trail & PDPA Privacy', desc: 'Tamper-evident SHA-256 cryptographic logs, consent tracking, and PDPA data portability/erasure.' };
     if (activeSubTab === 'public_facilities') return { domain: 'Domain 3: Registries & Hardware', title: 'Public Hospital Finder (Live Map & GPS)', desc: 'Interactive Singapore SLA map with real-time nearest A&E clinic distances and live wait times.' };
     return { domain: 'App Owner Portal', title: 'Command Center', desc: 'Central governance dashboard for Medical Director and Platform Owner.' };
@@ -1344,6 +1350,7 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
         { id: 'triage_medications' as SubTab, label: 'Deterministic Decisions & Meds', icon: Pill },
         { id: 'guardrails' as SubTab, label: 'Clinical Guardrails', icon: Shield },
         { id: 'simulation' as SubTab, label: 'Agentic Triage Simulator', icon: Bot, pill: 'Live Trace' },
+        { id: 'engine_health_check' as SubTab, label: 'Engine Health Check & QA', icon: CheckCheck, pill: 'Automated QA' },
         { id: 'weather' as SubTab, label: 'Environmental Surveillance', icon: CloudSun },
       ]
     },
@@ -1367,6 +1374,7 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
         { id: 'rbac' as SubTab, label: 'RBAC & Permissions Matrix', icon: Users },
         { id: 'statistics' as SubTab, label: 'Key Statistics & KPIs', icon: BarChart3 },
         { id: 'feedback' as SubTab, label: 'Customer Feedback Hub', icon: MessageSquareHeart, badge: feedbackList.length > 0 ? `${feedbackList.length}` : undefined },
+        { id: 'db_browser' as SubTab, label: 'SQLite DB Browser', icon: Database, pill: 'WAL Active' },
         { id: 'pdpa_audit' as SubTab, label: 'Audit Trail & PDPA Privacy', icon: ShieldCheck },
       ]
     }
@@ -1409,7 +1417,15 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
                 <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                 <span>Deterministic Clinical Safety Net Active</span>
                 <span className="text-slate-500">•</span>
-                <span className="font-mono text-[11px] text-teal-300">SQLite: data/chat.db</span>
+                <button
+                  type="button"
+                  onClick={() => handleSelectNav('db_browser')}
+                  className="font-mono text-[11px] text-teal-300 hover:text-teal-200 hover:underline flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Click to open SQLite Database Browser"
+                >
+                  <Database size={11} />
+                  <span>SQLite: data/chat.db</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1436,6 +1452,14 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
             >
               <Layers size={14} className="text-indigo-300" />
               <span>Unified Pathways</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectNav('engine_health_check')}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white transition-all flex items-center gap-1.5 border border-white/20"
+            >
+              <CheckCheck size={14} className="text-emerald-300" />
+              <span>Engine QA</span>
             </button>
             <button
               type="button"
@@ -2944,6 +2968,13 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
           customRules={customRules}
           onOpenSos={onOpenSos}
         />
+      )}
+
+      {/* ========================================================================= */}
+      {/* 2.6 TRIAGE ENGINE HEALTH CHECK & AUTOMATED QA RUNNER                      */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'engine_health_check' && (
+        <TriageEngineHealthCheckView />
       )}
 
       {/* ========================================================================= */}
@@ -4722,6 +4753,11 @@ export const AppOwnerPortalView: React.FC<AppOwnerPortalViewProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {/* Embedded SQLite Database Browser */}
+      {activeSubTab === 'db_browser' && (
+        <DatabaseBrowserView />
       )}
 
       {/* Embedded Audit & PDPA Privacy View (Workspace stays inside Command Center) */}

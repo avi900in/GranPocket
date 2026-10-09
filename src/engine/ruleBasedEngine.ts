@@ -9,6 +9,7 @@ import type {
   TriageResult, ContentStatus, Ailment, Language
 } from '../types';
 import { getResultPhrasing } from './grandmaVoice';
+import { resolveAilmentVector } from './vectorSearch';
 
 // ===== 16 MVP Ailments (SRS §7.3) =====
 export const AILMENTS: Ailment[] = [
@@ -1236,6 +1237,7 @@ export function applyProfileModifiers(
 
   const ageBand = getAgeBand(person.dob);
   const profile = person.medicalProfile;
+  if (!profile) return { severity, reasons };
 
   // 1. Blood thinners + head injury or bleeding → RED
   if (ailmentCode === 'injury_wound' || ailmentCode === 'headache') {
@@ -1324,7 +1326,7 @@ export function runRuleBasedTriage(input: {
 }): TriageResult {
   const {
     text = '',
-    ailmentCode,
+    ailmentCode: rawAilmentCode,
     answers = {},
     person,
     language = 'en',
@@ -1332,8 +1334,62 @@ export function runRuleBasedTriage(input: {
     customRules = [],
   } = input;
 
+  // Tri-Tier Diagnostic Pipeline:
+  // Tier 1: Direct Search in Ailments Table (exact code or exact/partial name match)
+  // Tier 2: Vector Search (Dense 1024-D semantic vector cosine similarity)
+  // Tier 3: Fallback Diagnosis ('general' symptom review)
+  let ailmentCode: string | undefined = undefined;
+
+  // 1. Direct Search in Ailments Table
+  if (rawAilmentCode) {
+    const rawNormalized = rawAilmentCode.trim().toLowerCase();
+    const directMatch = AILMENTS.find(a => 
+      a.code.toLowerCase() === rawNormalized ||
+      a.code.toLowerCase().replace(/_/g, ' ') === rawNormalized ||
+      a.name.toLowerCase() === rawNormalized ||
+      (a.nameZh && a.nameZh.toLowerCase() === rawNormalized) ||
+      (a.nameMs && a.nameMs.toLowerCase() === rawNormalized)
+    );
+    if (directMatch) {
+      ailmentCode = directMatch.code;
+      console.log(`[Triage Engine] Tier 1: Direct search matched "${rawAilmentCode}" -> "${ailmentCode}"`);
+    }
+  }
+
+  // 1b. Direct keyword search against ailment table names/codes in raw text if still unresolved
+  if (!ailmentCode && text) {
+    const cleanText = text.toLowerCase();
+    for (const a of AILMENTS) {
+      const codeWord = a.code.replace(/_/g, ' ').toLowerCase();
+      const nameWord = a.name.toLowerCase();
+      if (cleanText.includes(codeWord) || cleanText.includes(nameWord)) {
+        ailmentCode = a.code;
+        console.log(`[Triage Engine] Tier 1: Direct text keyword search matched -> "${ailmentCode}"`);
+        break;
+      }
+    }
+  }
+
+  // 2. Vector Search (Semantic Cosine Similarity)
+  if (!ailmentCode) {
+    const query = rawAilmentCode || text || '';
+    if (query.trim()) {
+      const vectorResolved = resolveAilmentVector(query);
+      if (vectorResolved) {
+        ailmentCode = vectorResolved.code;
+        console.log(`[Triage Engine] Tier 2: Vector Search resolved "${query}" -> "${vectorResolved.code}" (${(vectorResolved.similarity * 100).toFixed(1)}% cosine similarity)`);
+      }
+    }
+  }
+
+  // 3. Fallback Diagnosis (General / Unclassified Clinical Presentation)
+  if (!ailmentCode) {
+    ailmentCode = 'general';
+    console.log(`[Triage Engine] Tier 3: Fallback diagnosis applied -> "${ailmentCode}" (General review)`);
+  }
+
   console.log(`[Triage Engine] ====== Starting runTriage() ======`);
-  console.log(`[Triage Engine] Ailment Code: ${ailmentCode}`);
+  console.log(`[Triage Engine] Resolved Ailment Code: ${ailmentCode} (raw: ${rawAilmentCode || 'none'})`);
   const conditionNames = person.medicalProfile?.conditions?.map(c => c.name).join(',') || 'None';
   console.log(`[Triage Engine] Patient Profile loaded: Age ${person.dob}, Conditions: ${conditionNames}`);
 
@@ -1612,6 +1668,23 @@ function evaluateAilmentTree(
       return { severity: 'YELLOW', reasons: ['Oral rehydration salts recommended; seek GP review if symptoms persist > 48 hours'], ruleId: 'VD-MILD' };
     }
 
+    case 'headache': {
+      if (answers.sudden_severe === 'yes' || answers.thunderclap === 'yes' || answers.stiff_neck === 'yes') {
+        return { severity: 'RED', reasons: ['Sudden thunderclap headache or headache with neck stiffness is an emergency'], ruleId: 'HEADACHE-ACUTE-RED' };
+      }
+      return { severity: 'YELLOW', reasons: ['Mild tension or persistent headache — ensure hydration and consult GP within 1-3 days if not settling'], ruleId: 'HEADACHE-MILD-GP' };
+    }
+
+    case 'sore_throat': {
+      if (answers.unable_to_swallow === 'yes' || answers.drooling === 'yes' || answers.breathing_difficulty === 'yes') {
+        return { severity: 'RED', reasons: ['Inability to swallow saliva or respiratory distress indicates acute epiglottitis or airway compromise'], ruleId: 'THROAT-AIRWAY-RED' };
+      }
+      if (answers.fever === true && answers.severe_pain === true) {
+        return { severity: 'YELLOW', reasons: ['Significant throat pain with fever warrants primary care doctor examination for tonsillitis'], ruleId: 'THROAT-GP' };
+      }
+      return { severity: 'GREEN', reasons: ['Mild throat irritation or pharyngitis — lozenges, warm liquids, and home rest advised'], ruleId: 'THROAT-HOME' };
+    }
+
     case 'rash': {
       if (answers.non_blanching === 'yes' || answers.non_blanching === 'no_fade') {
         return { severity: 'RED', reasons: ['Non-blanching petechial or purpuric rash is a medical emergency (rule out meningococcemia)'], ruleId: 'RASH-PETECHIAE' };
@@ -1619,7 +1692,31 @@ function evaluateAilmentTree(
       if (answers.with_breathing_difficulty === 'yes' || answers.with_swelling === 'yes') {
         return { severity: 'RED', reasons: ['Widespread rash with facial swelling or dyspnea indicates anaphylaxis'], ruleId: 'RASH-ANAPHYLAXIS' };
       }
+      if (answers.fever === false && (answers.oozing === false || answers.oozing === 'no')) {
+        return { severity: 'GREEN', reasons: ['Mild localized skin irritation or eczema flare without infection or red flags — apply moisturizers and maintain hydration'], ruleId: 'RASH-MILD-HOME' };
+      }
       return { severity: 'YELLOW', reasons: ['Rash without airway signs — keep area clean and cool; consult GP for topical treatment'], ruleId: 'RASH-MILD' };
+    }
+
+    case 'uti': {
+      if (answers.flank_pain === 'yes' || answers.high_fever === 'yes') {
+        return { severity: 'ORANGE', reasons: ['Urinary symptoms with high fever or flank pain suggests acute pyelonephritis'], ruleId: 'UTI-PYELONEPHRITIS' };
+      }
+      return { severity: 'YELLOW', reasons: ['Dysuria or urinary frequency requires clinic urine dipstick test and review within 1-3 days'], ruleId: 'UTI-MILD-GP' };
+    }
+
+    case 'earache': {
+      if (answers.mastoid_swelling === 'yes' || answers.severe_pain === 'yes') {
+        return { severity: 'ORANGE', reasons: ['Severe earache with swelling behind ear requires urgent ENT / GP assessment'], ruleId: 'EAR-URGENT' };
+      }
+      return { severity: 'YELLOW', reasons: ['Earache or fullness — avoid inserting objects into ear, consult GP within 1-3 days'], ruleId: 'EAR-MILD-GP' };
+    }
+
+    case 'general': {
+      if (answers.bp_check === true && answers.dizziness === false && answers.headache === false) {
+        return { severity: 'GREEN', reasons: ['Stable routine vitals / blood pressure check without symptomatic red flags — maintain scheduled routine care'], ruleId: 'VITALS-STABLE-HOME' };
+      }
+      return { severity: 'YELLOW', reasons: ['General symptom presentation — recommend GP assessment if not improving'], ruleId: 'GENERAL-REVIEW' };
     }
 
     case 'allergic_reaction': {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, Users, MapPin, Phone, Heart, Check, X, Sparkles, Plus, AlertCircle } from 'lucide-react';
+import { Home, Users, MapPin, Phone, Heart, Check, X, Sparkles, Plus, AlertCircle, ShieldCheck, Lock } from 'lucide-react';
 import type { Language } from '../types';
 import { lookupSingaporePostalCode } from '../engine/singaporeData';
 
@@ -36,6 +36,7 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
   const [caregiverPhone, setCaregiverPhone] = useState(initialPhone || '9876-5432');
   const [seedSampleData, setSeedSampleData] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showConsentModal, setShowConsentModal] = useState(false);
 
   React.useEffect(() => {
     if (isOpen && initialPhone) {
@@ -97,6 +98,12 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
     }
 
     setError(null);
+    // Show mandatory PDPA consent popup before proceeding with signup
+    setShowConsentModal(true);
+  };
+
+  const handleConfirmConsent = () => {
+    setShowConsentModal(false);
     onCreateHousehold({
       name: name.trim(),
       addressText: addressText.trim() || `Singapore Postal Sector ${postalCode}`,
@@ -353,6 +360,12 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
             </label>
           </div>
 
+          {/* PDPA Regulation Notice */}
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 text-[11px] text-[#52616B] dark:text-[#94A3B8]">
+            <Lock size={13} className="text-[#0F766E] dark:text-[#2DD4BF] shrink-0" />
+            <span>Singapore PDPA 2012 compliance notice & mandatory consent acknowledgement required upon registration.</span>
+          </div>
+
           {/* Modal Footer Buttons */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#DDE5E9] dark:border-[#1E2D37]">
             <button
@@ -372,6 +385,70 @@ export const CreateHouseholdModal: React.FC<CreateHouseholdModalProps> = ({
           </div>
         </form>
       </div>
+
+      {/* MANDATORY PDPA CONSENT POPUP MODAL */}
+      {showConsentModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white dark:bg-[#14212B] rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-[#DDE5E9] dark:border-[#1E2D37] space-y-5 animate-scaleUp">
+            {/* Header */}
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-[#E6F4F1] dark:bg-[#0F766E]/20 border border-[#0F766E]/30 flex items-center justify-center text-[#0F766E] dark:text-[#2DD4BF] shrink-0">
+                <ShieldCheck size={24} />
+              </div>
+              <div className="flex-1">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#E6F4F1] dark:bg-[#0F766E]/20 text-[#0F766E] dark:text-[#2DD4BF] text-[10px] font-bold uppercase tracking-wider mb-1">
+                  <span>🇸🇬 Singapore PDPA 2012 Mandatory Consent</span>
+                </div>
+                <h3 className="text-base sm:text-lg font-black text-[#14212B] dark:text-[#F1F5F9]">
+                  Personal Data Protection & Consent Notice
+                </h3>
+              </div>
+            </div>
+
+            {/* Mandatory Consent Body */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-[#FAFBFA] dark:bg-[#0F1A20] border border-[#DDE5E9] dark:border-[#1E2D37] text-xs leading-relaxed text-[#14212B] dark:text-[#E2E8F0] space-y-3 font-normal max-h-[55vh] overflow-y-auto">
+              <p className="font-semibold text-slate-900 dark:text-white leading-relaxed">
+                By clicking 'I Agree' or using GranPocket, you consent to the collection, use, and disclosure of your personal data (including health and medical information) by GranPocket and its authorized data intermediaries. This data will be collected and used strictly for the following purposes:
+              </p>
+              
+              <ul className="space-y-2 pl-4 list-disc text-[#334155] dark:text-[#CBD5E1]">
+                <li className="font-medium">
+                  Setting up and managing your user account
+                </li>
+                <li className="font-medium">
+                  Providing digital healthcare services, appointment scheduling, and treatment tracking
+                </li>
+                <li className="font-medium">
+                  Sharing necessary data with authorized medical practitioners or integrated systems (e.g., HealthHub, NEHR) for your direct care.
+                </li>
+              </ul>
+
+              <p className="text-[#52616B] dark:text-[#94A3B8] pt-2.5 border-t border-[#DDE5E9]/70 dark:border-[#1E2D37] leading-relaxed">
+                You may withdraw your consent at any time by contacting our Data Protection Officer at <span className="font-mono font-bold text-[#0F766E] dark:text-[#2DD4BF] bg-[#E6F4F1] dark:bg-[#0F766E]/20 px-1.5 py-0.5 rounded">[DPO Email]</span>, though doing so may limit or discontinue your ability to use certain features of the app
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConsentModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-[#DDE5E9] dark:border-[#1E2D37] text-xs font-bold text-[#52616B] dark:text-[#94A3B8] hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                Decline
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmConsent}
+                className="px-5 py-2.5 rounded-xl bg-[#0F766E] hover:bg-[#0B5C56] text-white text-xs font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                <Check size={16} />
+                <span>I Agree</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
