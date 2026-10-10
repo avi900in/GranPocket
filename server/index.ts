@@ -2456,3 +2456,14 @@ app.post('/api/agentic/swarm-harvest', async (req, res) => {
     res.end();
   }
 });
+
+// ============= Serve built frontend (single-service deploy, e.g. Railway) =============
+// Registered last so all /api routes above take precedence.
+const distDir = path.resolve(__dirname, '..', 'dist');
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir));
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+  console.log(`[static] Serving frontend from ${distDir}`);
+}
