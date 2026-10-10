@@ -30,13 +30,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // 数据库文件路径
-const dbPath = path.join(__dirname, '..', 'data', 'chat.db');
+// Bundled seed DB (committed to git). On Railway, set DB_PATH=/data/chat.db (volume mount).
+const seedDbPath = path.join(__dirname, '..', 'data', 'chat.db');
+const dbPath = process.env.DB_PATH || seedDbPath;
 
 // 确保 data 目录存在
 const dataDir = path.dirname(dbPath);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
+
+// First boot on a fresh volume: seed it with the bundled database
+if (dbPath !== seedDbPath && !fs.existsSync(dbPath) && fs.existsSync(seedDbPath)) {
+  fs.copyFileSync(seedDbPath, dbPath);
+  console.log(`[db] Seeded volume database at ${dbPath} from ${seedDbPath}`);
+}
+console.log(`[db] Using database: ${dbPath}`);
 
 // 创建数据库连接
 const db = new Database(dbPath);
