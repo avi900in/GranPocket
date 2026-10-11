@@ -4,7 +4,7 @@
 
 ---
 
-## 🌟 Key Architecture & Capabilities
+##  Key Architecture & Capabilities
 
 1. **Deterministic Red-Line Safety Engine**:
    - Hardcoded, non-LLM safety checks execute first to catch red-flag conditions (e.g., severe chest pain, stroke FAST indicators, anaphylaxis).
@@ -26,7 +26,7 @@
 
 ---
 
-## 🛠️ Technology Stack
+##  Technology Stack
 
 - **Frontend**: React 18, TypeScript, Vite, TailwindCSS, TDesign React UI, Lucide Icons, Leaflet
 - **Backend**: Node.js, Express, TypeScript, TSX, Better-SQLite3
@@ -35,7 +35,7 @@
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### 1. Prerequisites
 
