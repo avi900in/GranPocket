@@ -117,9 +117,51 @@ Clinical Objectives:
         },
       });
 
+      const groqKey = process.env.GROQ_API_KEY || '';
+      const openRouterKey = process.env.OPENROUTER_API_KEY || '';
+
+      // Determine LLM configuration for TRTC AI Conversation
+      let llmConfigObj: any;
+      if (groqKey) {
+        llmConfigObj = {
+          LLMType: 'openai',
+          Model: 'llama-3.3-70b-versatile',
+          APIKey: groqKey,
+          APIUrl: 'https://api.groq.com/openai/v1/chat/completions',
+          Streaming: true,
+          SystemPrompt: systemPrompt,
+          History: 10,
+        };
+      } else if (openRouterKey) {
+        llmConfigObj = {
+          LLMType: 'openai',
+          Model: 'meta-llama/llama-3.3-70b-instruct',
+          APIKey: openRouterKey,
+          APIUrl: 'https://openrouter.ai/api/v1/chat/completions',
+          Streaming: true,
+          SystemPrompt: systemPrompt,
+          History: 10,
+        };
+      } else {
+        llmConfigObj = {
+          LLMType: 'tencent',
+          Model: 'hunyuan-standard',
+          SystemPrompt: systemPrompt,
+          Streaming: true,
+          History: 10,
+        };
+      }
+
+      const ttsConfigObj: any = {
+        TTSType: 'flow',
+        Model: 'flow_01_turbo',
+        Speed: 1.0,
+      };
+
       const requestPayload: any = {
         SdkAppId: config.sdkAppId,
         RoomId: typeof params.roomId === 'number' ? params.roomId.toString() : params.roomId,
+        RoomIdType: 1,
         AgentConfig: {
           UserId: agentUserId,
           UserSig: agentSig.userSig,
@@ -128,14 +170,12 @@ Clinical Objectives:
           WelcomeMessage: `Hello ${params.patientContext?.name || ''}, I am your GranPocket triage doctor. Can you tell me what symptoms you are experiencing today?`,
           InterruptMode: 0, // Auto interrupt when patient speaks
         },
-        LLMConfig: {
-          Prompt: systemPrompt,
-          Model: 'hunyuan-standard',
+        STTConfig: {
+          Language: params.language === 'zh' ? 'zh' : params.language === 'ms' ? 'ms' : 'en',
         },
-        TTSConfig: {
-          VoiceType: 101001, // Natural warm empathetic clinician voice
-          Speed: 0,
-        },
+        // Tencent Cloud StartAIConversation API requires LLMConfig and TTSConfig to be JSON strings
+        LLMConfig: JSON.stringify(llmConfigObj),
+        TTSConfig: JSON.stringify(ttsConfigObj),
       };
 
       // Call Tencent Cloud API
