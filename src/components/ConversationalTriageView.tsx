@@ -81,10 +81,14 @@ export const ConversationalTriageView: React.FC<ConversationalTriageViewProps> =
 
   // Audio & SDK refs
   const recognitionRef = useRef<any>(null);
+  const isRecognitionActiveRef = useRef<boolean>(false);
+  const isRestartingRef = useRef<boolean>(false);
   const timerRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const synthRef = useRef<SpeechSynthesis | null>(typeof window !== 'undefined' ? window.speechSynthesis : null);
   const trtcClientRef = useRef<any>(null);
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const ttsSafetyTimeoutRef = useRef<any>(null);
 
   // Auto-scroll transcript container
   useEffect(() => {
@@ -107,16 +111,33 @@ export const ConversationalTriageView: React.FC<ConversationalTriageViewProps> =
     };
   }, [callStatus]);
 
-  // Cheerful Grandma voice synthesis
+  // Cheerful Grandma voice synthesis with robust GC protection and guaranteed completion timer
   const speakText = (text: string, onEnd?: () => void) => {
     if (isSpeakerMuted || !synthRef.current) {
       if (onEnd) onEnd();
       return;
     }
+
+    if (ttsSafetyTimeoutRef.current) {
+      clearTimeout(ttsSafetyTimeoutRef.current);
+      ttsSafetyTimeoutRef.current = null;
+    }
+
     try {
       synthRef.current.cancel();
+
+      // Ensure browser speech synthesis is unpaused (Chromium/Safari bug on production domains)
+      if (synthRef.current.paused) {
+        try { synthRef.current.resume(); } catch (e) {}
+      }
+
       const utterance = new SpeechSynthesisUtterance(text);
-      
+      activeUtteranceRef.current = utterance;
+      // Retain reference globally to prevent Chrome/Safari garbage collection from swallowing onend
+      if (typeof window !== 'undefined') {
+        (window as any).__activeUtterance = utterance;
+      }
+
       // Select warmest female / grandma-like voice from system voices
       const voices = synthRef.current.getVoices ? synthRef.current.getVoices() : [];
       let selectedVoice: SpeechSynthesisVoice | null = null;
@@ -144,19 +165,53 @@ export const ConversationalTriageView: React.FC<ConversationalTriageViewProps> =
       utterance.pitch = 1.22;
       utterance.rate = 0.94;
 
-      utterance.onstart = () => setAgentSpeaking(true);
+      let hasFinished = false;
+      const finishExecution = () => {
+        if (hasFinished) return;
+        hasFinished = true;
+        if (ttsSafetyTimeoutRef.current) {
+          clearTimeout(ttsSafetyTimeoutRef.current);
+          ttsSafetyTimeoutRef.current = null;
+        }
+        setAgentSpeaking(false);
+        activeUtteranceRef.current = null;
+        if (typeof window !== 'undefined') {
+          delete (window as any).__activeUtterance;
+        }
+        // Small buffer before listening for user response to prevent audio echo
+        setTimeout(() => {
+          if (onEnd) onEnd();
+        }, 150);
+      };
+
+      utterance.onstart = () => {
+        setAgentSpeaking(true);
+      };
+
       utterance.onend = () => {
-        setAgentSpeaking(false);
-        if (onEnd) onEnd();
+        finishExecution();
       };
-      utterance.onerror = () => {
-        setAgentSpeaking(false);
-        if (onEnd) onEnd();
+
+      utterance.onerror = (err) => {
+        console.warn('TTS utterance event error:', err);
+        finishExecution();
       };
+
+      // Guaranteed fallback timeout: in deployed environments, if browser never fires onend,
+      // prevent the call from hanging indefinitely.
+      const estimatedDurationMs = Math.max(3000, Math.min(18000, (text.length / 10) * 1200 + 1500));
+      ttsSafetyTimeoutRef.current = setTimeout(() => {
+        if (!hasFinished) {
+          console.info('[TTS] Guaranteed timeout elapsed, advancing flow');
+          finishExecution();
+        }
+      }, estimatedDurationMs);
+
       synthRef.current.speak(utterance);
     } catch (e) {
       console.warn('TTS playback error:', e);
       setAgentSpeaking(false);
+      activeUtteranceRef.current = null;
       if (onEnd) onEnd();
     }
   };
@@ -221,7 +276,7 @@ export const ConversationalTriageView: React.FC<ConversationalTriageViewProps> =
           }),
         });
 
-        // Initialize TRTC Web SDK if available
+        // Initialize TRTC Web SDK if available (non-blocking so Web Speech Recognition is not disrupted)
         try {
           const TRTCModule = await import('trtc-sdk-v5');
           const TRTC = TRTCModule.default || TRTCModule;
@@ -234,7 +289,10 @@ export const ConversationalTriageView: React.FC<ConversationalTriageViewProps> =
               userSig: sigData.userSig,
               sdkAppId: sigData.sdkAppId,
             });
-            await trtc.startLocalAudio();
+            // Try publishing audio, but if it fails or conflicts with SpeechRecognition, fail softly
+            trtc.startLocalAudio().catch((audioErr: any) => {
+              console.warn('[TRTC] startLocalAudio non-fatal notice:', audioErr);
+            });
           }
         } catch (webrtcErr) {
           console.info('[TRTC] Standard browser audio fallback active');
@@ -310,10 +368,17 @@ export const ConversationalTriageView: React.FC<ConversationalTriageViewProps> =
     };
   }, []);
 
-  // Web Speech recognition listener for patient voice
+  // Web Speech recognition listener for patient voice with resilient auto-restart and echo protection
   const startSpeechRecognition = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch (e) {}
+      recognitionRef.current = null;
+    }
 
     try {
       const recognition = new SpeechRecognition();
@@ -322,10 +387,17 @@ export const ConversationalTriageView: React.FC<ConversationalTriageViewProps> =
       recognition.lang = language === 'zh' ? 'zh-CN' : language === 'ms' ? 'ms-MY' : 'en-SG';
 
       recognition.onstart = () => {
+        isRecognitionActiveRef.current = true;
+        isRestartingRef.current = false;
         setPatientSpeaking(false);
       };
 
       recognition.onresult = (event: any) => {
+        // Echo filter: ignore microphone pickup if Dr. GranPocket voice is currently actively playing
+        if (agentSpeaking) {
+          return;
+        }
+
         let interim = '';
         let finalTxt = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -350,22 +422,45 @@ export const ConversationalTriageView: React.FC<ConversationalTriageViewProps> =
 
       recognition.onerror = (e: any) => {
         if (e.error !== 'no-speech') {
-          console.warn('Speech recog warning:', e.error);
+          console.warn('Speech recog event warning:', e.error);
         }
         setPatientSpeaking(false);
+        // If not allowed, do not spam restart
+        if (e.error === 'not-allowed') {
+          isRecognitionActiveRef.current = false;
+        }
       };
 
       recognition.onend = () => {
+        isRecognitionActiveRef.current = false;
         setPatientSpeaking(false);
+
+        // Resilient restart: if call is still active and not muted, cleanly restart with backoff
         if (callStatusRef.current !== 'analyzing' && callStatusRef.current !== 'ended' && !isMuted) {
-          try { recognition.start(); } catch (e) {}
+          if (!isRestartingRef.current) {
+            isRestartingRef.current = true;
+            setTimeout(() => {
+              if (callStatusRef.current !== 'analyzing' && callStatusRef.current !== 'ended' && !isMuted && !isRecognitionActiveRef.current) {
+                try {
+                  recognition.start();
+                } catch (err: any) {
+                  // If start threw (e.g. invalid state), re-instantiate cleanly
+                  if (err.name !== 'InvalidStateError') {
+                    console.info('[Speech] Rebuilding recognition instance...');
+                    startSpeechRecognition();
+                  }
+                }
+              }
+              isRestartingRef.current = false;
+            }, 300);
+          }
         }
       };
 
       recognition.start();
       recognitionRef.current = recognition;
     } catch (err) {
-      console.warn('SpeechRecognition failed:', err);
+      console.warn('SpeechRecognition start failed:', err);
     }
   };
 
