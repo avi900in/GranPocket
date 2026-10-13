@@ -1362,7 +1362,10 @@ export function runRuleBasedTriage(input: {
     for (const a of AILMENTS) {
       const codeWord = a.code.replace(/_/g, ' ').toLowerCase();
       const nameWord = a.name.toLowerCase();
-      if (cleanText.includes(codeWord) || cleanText.includes(nameWord)) {
+      // Match on full word boundaries (\b) to avoid false substring positives (e.g. 'routine' matching 'uti')
+      const codeRegex = new RegExp(`\\b${codeWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      const nameRegex = new RegExp(`\\b${nameWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (codeRegex.test(cleanText) || nameRegex.test(cleanText)) {
         ailmentCode = a.code;
         console.log(`[Triage Engine] Tier 1: Direct text keyword search matched -> "${ailmentCode}"`);
         break;
@@ -1715,6 +1718,13 @@ function evaluateAilmentTree(
     case 'general': {
       if (answers.bp_check === true && answers.dizziness === false && answers.headache === false) {
         return { severity: 'GREEN', reasons: ['Stable routine vitals / blood pressure check without symptomatic red flags — maintain scheduled routine care'], ruleId: 'VITALS-STABLE-HOME' };
+      }
+      if (answers.other_symptoms === 'no' || answers.other_symptoms === false) {
+        return { 
+          severity: 'GREEN', 
+          reasons: [lang === 'zh' ? '无其他伴随症状或危险信号，建议保持居家观察与充分休息' : lang === 'ms' ? 'Tiada gejala tambahan atau tanda bahaya — teruskan pemantauan di rumah' : 'No additional symptoms or acute red flags reported — suitable for supportive home monitoring'], 
+          ruleId: 'GENERAL-NO-SYMPTOMS-GREEN' 
+        };
       }
       return { severity: 'YELLOW', reasons: ['General symptom presentation — recommend GP assessment if not improving'], ruleId: 'GENERAL-REVIEW' };
     }
@@ -2705,9 +2715,19 @@ export function getQuestionTree(ailmentCode: string, person?: Person | null): Qu
         answerType: 'yes_no',
       },
     ],
+    general: [
+      {
+        id: 'other_symptoms',
+        textKey: 'q.general.other_symptoms',
+        text: "Is there any other symptom you'd like to highlight?",
+        textZh: "您是否还有其他想要特别说明的症状？",
+        textMs: "Adakah terdapat sebarang gejala lain yang ingin anda nyatakan?",
+        answerType: 'yes_no',
+      },
+    ],
   };
 
-  return trees[ailmentCode] || [];
+  return trees[ailmentCode] || trees.general || [];
 }
 
 export const RULESET_VERSION = '1.0.0';

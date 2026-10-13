@@ -58,6 +58,7 @@ import { EmergencySosModal } from './components/EmergencySosModal';
 import { CrisisModal } from './components/CrisisModal';
 import { CreateHouseholdModal } from './components/CreateHouseholdModal';
 import { TriageFlowView } from './components/TriageFlowView';
+import { ConversationalTriageView } from './components/ConversationalTriageView';
 import { TriageResultView } from './components/TriageResultView';
 import { FamilyProfilesView } from './components/FamilyProfilesView';
 import { MedicationLogView } from './components/MedicationLogView';
@@ -757,6 +758,16 @@ export default function App() {
   const [isCrisisOpen, setIsCrisisOpen] = useState(false);
   const [isCreateHouseholdOpen, setIsCreateHouseholdOpen] = useState(false);
   const [triageMode, setTriageMode] = useState<'rule-based' | 'agentic'>('rule-based');
+  const [isTrtcConversationalActive, setIsTrtcConversationalActive] = useState(false);
+
+  useEffect(() => {
+    (window as any).__onStartConversationalTriage = () => {
+      setIsTrtcConversationalActive(true);
+    };
+    return () => {
+      delete (window as any).__onStartConversationalTriage;
+    };
+  }, []);
 
   // Triage Completion Handler
   const handleTriageComplete = (result: TriageResult, answers: Record<string, any>, ailment?: Ailment) => {
@@ -777,6 +788,10 @@ export default function App() {
     setAuditLogs(prev => [newAudit, ...prev]);
 
     // Save triage assessment to DB
+    const effectiveTriageMethod = (answers as any)?.mode === 'trtc-conversational'
+      ? 'trtc-conversational'
+      : triageMode;
+
     saveTriageAssessmentToDb({
       id: `triage-${Date.now()}`,
       date: new Date().toLocaleDateString('en-CA'),
@@ -784,9 +799,9 @@ export default function App() {
       requested_by_id: currentUser?.id,
       requested_by_name: currentUser?.name || 'Unknown',
       information_provided: answers ? JSON.stringify(answers) : 'None',
-      triage_method: triageMode,
+      triage_method: effectiveTriageMethod,
       triage_outcome: result.severity,
-      triage_rationale: result.reasons?.join(' ') || 'No rationale provided'
+      triage_rationale: result.reasons?.join(' ') || result.action || 'No rationale provided'
     }).catch(err => console.error('Failed to save triage assessment:', err));
 
     // If RED, automatically open Emergency SOS prompt if not already open
@@ -1556,6 +1571,17 @@ export default function App() {
                   onCreateMonitoringPlan={handleCreateMonitoringPlan}
                   onRemoveAilment={handleRemoveAilment}
                   onOpenFacilities={() => setActiveTab('facilities')}
+                />
+              ) : isTrtcConversationalActive ? (
+                <ConversationalTriageView
+                  person={selectedPerson}
+                  language={language}
+                  onTriageComplete={(result, answers, ailment) => {
+                    setIsTrtcConversationalActive(false);
+                    handleTriageComplete(result, answers, ailment);
+                  }}
+                  onOpenSos={() => setIsSosOpen(true)}
+                  onCancel={() => setIsTrtcConversationalActive(false)}
                 />
               ) : (
                 <TriageFlowView

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, Camera, Mic, Send, AlertOctagon, CheckCircle2, ArrowRight, Loader2, Sparkles, Thermometer, Wind, Eye, Brain, Zap, Bandage, HelpCircle, ChevronRight, XCircle } from 'lucide-react';
+import { Activity, Camera, Mic, Send, AlertOctagon, CheckCircle2, ArrowRight, Loader2, Sparkles, Thermometer, Wind, Eye, Brain, Zap, Bandage, HelpCircle, ChevronRight, XCircle, Stethoscope } from 'lucide-react';
 import type { Person, Language, TriageResult, Ailment, QuestionStep } from '../types';
 import { getQuestionTree, runTriage } from '../engine/triageEngine';
 import { runRuleBasedTriage, getQuestionTree as getRuleBasedQuestionTree } from '../engine/ruleBasedEngine';
@@ -354,6 +354,33 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
     const newAnswers = { ...answers, [currentQ.id]: answer };
     setAnswers(newAnswers);
     setAnswerInput(''); // Reset text box
+
+    // SPECIAL FLOW FOR 'GENERAL' AILMENT: "Is there any other symptom you'd like to highlight?"
+    if (selectedAilment?.code === 'general' && currentQ.id === 'other_symptoms' && (answer === 'yes' || answer === true)) {
+      // Prompt user for additional symptom details, merge with existing textInput, and redo triage
+      const additional = window.prompt(
+        language === 'zh'
+          ? '请描述您想补充的其他症状：'
+          : language === 'ms'
+          ? 'Sila nyatakan gejala tambahan yang ingin anda tambahkan:'
+          : "Please describe the other symptoms you'd like to highlight:"
+      );
+
+      if (additional && additional.trim()) {
+        const mergedText = textInput.trim() 
+          ? `${textInput.trim()}. Additionally: ${additional.trim()}`
+          : additional.trim();
+        setTextInput(mergedText);
+        setStep('intake');
+        setAnswers({});
+        setCurrentQuestionIndex(0);
+        // Re-run intake diagnostic cascade with merged text
+        setTimeout(() => {
+          handleIntakeWithVectorSearch(mergedText);
+        }, 50);
+        return;
+      }
+    }
 
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
@@ -718,11 +745,18 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
           { id: 'chips', icon: <Activity size={16} />, label: t.categories },
           { id: 'text', icon: <Send size={16} />, label: t.typeText },
           { id: 'voice', icon: <Mic size={16} />, label: t.microphone },
+          { id: 'conversational', icon: <Stethoscope size={16} className="text-indigo-600 animate-pulse" />, label: "TRTC Live Triage" },
           { id: 'photo', icon: <Camera size={16} />, label: t.cameraPhoto }
         ].map(mode => (
           <button
             key={mode.id}
-            onClick={() => setIntakeMode(mode.id as any)}
+            onClick={() => {
+              if (mode.id === 'conversational' && (window as any).__onStartConversationalTriage) {
+                (window as any).__onStartConversationalTriage();
+                return;
+              }
+              setIntakeMode(mode.id as any);
+            }}
             className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all ${
               intakeMode === mode.id 
                 ? 'bg-white text-blue-600 shadow-sm border border-gray-200/50 scale-[1.02]' 
@@ -807,7 +841,30 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
         )}
 
         {intakeMode === 'voice' && (
-          <div className="animate-in fade-in">
+          <div className="animate-in fade-in space-y-4">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-indigo-950/40 border border-blue-200 dark:border-indigo-800/50 p-4 rounded-2xl flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
+                  <Sparkles size={20} />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100">Want full two-way discussion?</h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Launch a real-time conversational triage call with Dr. GranPocket (Tencent RTC).</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if ((window as any).__onStartConversationalTriage) {
+                    (window as any).__onStartConversationalTriage();
+                  }
+                }}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition-all shrink-0"
+              >
+                Start TRTC Call
+              </button>
+            </div>
+
             <RealVoiceRecorder 
               language={language}
               onTranscriptChange={setTextInput}
