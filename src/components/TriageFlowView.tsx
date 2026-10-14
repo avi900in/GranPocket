@@ -686,8 +686,13 @@ export const TriageFlowView: React.FC<TriageFlowViewProps> = ({
         </div>
         
         <h3 className="text-2xl font-bold text-gray-900 leading-snug">{q.text}</h3>
+        {q.helpText && (
+          <p className="text-sm text-gray-500 bg-blue-50/50 p-3 rounded-xl border border-blue-100/60 leading-relaxed">
+            💡 {q.helpText}
+          </p>
+        )}
 
-        <div className="space-y-3 mt-8">
+        <div className="space-y-3 mt-6">
           {q.answerType === 'yes_no' && (
             <div className="grid grid-cols-2 gap-4">
               <button onClick={() => handleAnswer('yes')} className="py-4 px-6 rounded-2xl border-2 border-gray-100 hover:border-blue-500 hover:bg-blue-50 font-bold text-gray-700 transition-all">{t.yes}</button>

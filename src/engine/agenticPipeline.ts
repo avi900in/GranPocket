@@ -104,7 +104,8 @@ export function runDeterministicSafetyNet(
 
   // Infant Red-Line (< 1 year)
   if (age <= 1) {
-    if (content.includes('fever') && (content.includes('38') || content.includes('high'))) {
+    const tempC = answers && answers.temp_c !== undefined ? Number(answers.temp_c) : undefined;
+    if ((content.includes('fever') && (content.includes('38') || content.includes('high'))) || (tempC !== undefined && tempC >= 38.0)) {
       return {
         tripped: true,
         reason: 'Newborn/Infant Fever detected (≥ 38°C)',

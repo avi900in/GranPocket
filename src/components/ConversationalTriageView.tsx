@@ -610,6 +610,25 @@ export const ConversationalTriageView: React.FC<ConversationalTriageViewProps> =
     } else if (currentQ.answerType === 'number') {
       const match = lower.match(/\d+(\.\d+)?/);
       if (match) parsedAnswer = parseFloat(match[0]);
+    } else if (currentQ.answerType === 'choice' && currentQ.options) {
+      // Smart matching for body measurement site or choice options
+      if (currentQ.id === 'temp_site') {
+        if (lower.includes('armpit') || lower.includes('underarm') || lower.includes('axillary') || lower.includes('腋')) {
+          parsedAnswer = 'Underarm (armpit)';
+        } else if (lower.includes('mouth') || lower.includes('oral') || lower.includes('口')) {
+          parsedAnswer = 'Oral (mouth)';
+        } else if (lower.includes('forehead') || lower.includes('head') || lower.includes('额')) {
+          parsedAnswer = 'Forehead';
+        } else if (lower.includes('ear') || lower.includes('tympanic') || lower.includes('耳')) {
+          parsedAnswer = 'Ear';
+        } else if (lower.includes('rectal') || lower.includes('bottom') || lower.includes('肛')) {
+          parsedAnswer = 'Rectal';
+        }
+      }
+      if (parsedAnswer === spokenText) {
+        const found = currentQ.options.find(opt => lower.includes(opt.toLowerCase()) || opt.toLowerCase().includes(lower));
+        if (found) parsedAnswer = found;
+      }
     }
 
     // Update answers dictionary

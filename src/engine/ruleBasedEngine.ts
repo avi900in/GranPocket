@@ -1314,6 +1314,36 @@ export function getDynamicCustomRules(): TriageRule[] {
   return dynamicCustomRules;
 }
 
+/**
+ * Normalizes temperature reading to core body equivalent based on measurement site.
+ * - Underarm (armpit): +0.8°C
+ * - Oral (mouth): +0.5°C
+ * - Forehead, Ear, Rectal: 0.0°C (raw temperature)
+ */
+export function normalizeTemperature(
+  tempC: number,
+  site?: string
+): { normalizedTempC: number; offsetApplied: number } {
+  if (!site) return { normalizedTempC: tempC, offsetApplied: 0 };
+  const s = site.toLowerCase().trim();
+  if (s.includes('armpit') || s.includes('underarm') || s.includes('axillary')) {
+    return {
+      normalizedTempC: Math.round((tempC + 0.8) * 10) / 10,
+      offsetApplied: 0.8,
+    };
+  }
+  if (s.includes('oral') || s.includes('mouth')) {
+    return {
+      normalizedTempC: Math.round((tempC + 0.5) * 10) / 10,
+      offsetApplied: 0.5,
+    };
+  }
+  return {
+    normalizedTempC: tempC,
+    offsetApplied: 0.0,
+  };
+}
+
 // ===== Main Triage Evaluation Engine =====
 export function runRuleBasedTriage(input: {
   text?: string;
@@ -1327,12 +1357,30 @@ export function runRuleBasedTriage(input: {
   const {
     text = '',
     ailmentCode: rawAilmentCode,
-    answers = {},
+    answers: rawAnswers = {},
     person,
     language = 'en',
     imageDescriptors = [],
     customRules = [],
   } = input;
+
+  // Calibrate temperature if measurement site is provided
+  const answers: Record<string, any> = { ...rawAnswers };
+  let tempCalibrationNotice = '';
+  if (answers.temp_c !== undefined && answers.temp_c !== null && answers.temp_c !== '') {
+    const rawVal = Number(answers.temp_c);
+    const siteVal = answers.temp_site ? String(answers.temp_site) : undefined;
+    const { normalizedTempC, offsetApplied } = normalizeTemperature(rawVal, siteVal);
+    answers.temp_c = normalizedTempC;
+    if (offsetApplied > 0) {
+      tempCalibrationNotice =
+        language === 'zh'
+          ? `（测量部位：${siteVal}，校准+${offsetApplied}°C至核心体温${normalizedTempC}°C）`
+          : language === 'ms'
+          ? ` (Lokasi sukatan: ${siteVal}, ditentukur +${offsetApplied}°C ke suhu teras ${normalizedTempC}°C)`
+          : ` (Measurement site: ${siteVal}, calibrated +${offsetApplied}°C to core body equivalent ${normalizedTempC}°C)`;
+    }
+  }
 
   // Tri-Tier Diagnostic Pipeline:
   // Tier 1: Direct Search in Ailments Table (exact code or exact/partial name match)
@@ -1491,6 +1539,10 @@ export function runRuleBasedTriage(input: {
         ? 'Maklumat tidak mencukupi untuk penilaian penuh — sila rujuk doktor jika bimbang.'
         : 'Initial assessment based on limited details — when unsure, seek medical consultation.'
     );
+  }
+
+  if (tempCalibrationNotice && reasons.length > 0) {
+    reasons[0] = `${reasons[0]} ${tempCalibrationNotice}`;
   }
 
   return buildResult(severity, reasons, triggeredRules, ailmentCode, person, language, keywordResult.matchedKeywords);
@@ -2163,8 +2215,24 @@ export function getQuestionTree(ailmentCode: string, person?: Person | null): Qu
         max: 42.0,
         step: 0.1,
         helpText: isBabyOrToddler
-          ? 'Use a digital thermometer under the armpit, forehead, or ear. Infant normal is 36.5–37.5°C.'
-          : 'Use a digital thermometer under the armpit, forehead, or ear.',
+          ? 'Use a digital thermometer. Infant normal core is 36.5–37.5°C.'
+          : 'Use a digital thermometer under the armpit, forehead, mouth, ear, or rectum.',
+      },
+      {
+        id: 'temp_site',
+        textKey: 'q.fever.temp_site',
+        text: 'Which body part was this temperature measured from?',
+        textZh: '测量体温的部位是哪里？',
+        textMs: 'Di manakah bahagian badan suhu disukat?',
+        answerType: 'choice',
+        options: [
+          'Underarm (armpit)',
+          'Oral (mouth)',
+          'Forehead',
+          'Ear',
+          'Rectal'
+        ],
+        helpText: 'Underarm (+0.8°C) and Oral (+0.5°C) readings are automatically calibrated to core body equivalent.'
       },
       {
         id: 'drowsy',

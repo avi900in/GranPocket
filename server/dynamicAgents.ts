@@ -16,6 +16,7 @@ import * as db from './db.js';
 import type { Person, Severity, TriageRule, HomeMedicationSuggestion } from '../src/types.ts';
 import { runDeterministicSafetyNet } from '../src/engine/agenticPipeline.ts';
 import { searchRulesVector } from '../src/engine/vectorSearch.ts';
+import { normalizeTemperature } from '../src/engine/ruleBasedEngine.ts';
 
 export interface DynamicAgenticInput {
   text?: string;
@@ -1325,7 +1326,20 @@ Sample Log Severity Distribution: ${JSON.stringify(recentLogs.slice(0, 5).map(l 
 // Persists the complete multi-agent run into SQLite triage_execution_logs
 // =========================================================================
 export async function executeDynamicAgenticPipeline(input: DynamicAgenticInput) {
-  const { text = '', answers = {}, person, sessionId, config = {} } = input;
+  const { text = '', answers: rawAnswers = {}, person, sessionId, config = {} } = input;
+  const answers: Record<string, any> = { ...rawAnswers };
+
+  // Calibrate temperature based on measurement site (underarm +0.8°C, oral +0.5°C)
+  if (answers.temp_c !== undefined && answers.temp_c !== null && answers.temp_c !== '') {
+    const rawVal = Number(answers.temp_c);
+    const siteVal = answers.temp_site ? String(answers.temp_site) : undefined;
+    const { normalizedTempC, offsetApplied } = normalizeTemperature(rawVal, siteVal);
+    answers.temp_c = normalizedTempC;
+    if (offsetApplied > 0) {
+      console.log(`[Agentic Triage] Temperature calibrated from site "${siteVal}": ${rawVal}°C + ${offsetApplied}°C -> ${normalizedTempC}°C`);
+    }
+  }
+
   const guardrails = db.getGuardrailConfig();
   const activeGuardrails = { ...guardrails, ...config };
 
